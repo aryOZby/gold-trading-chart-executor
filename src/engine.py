@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 
 from .chart_inputs import read_chart_inputs
+from .commands import write_command
 from .config import AppConfig
 from .models import CatalogSignal, ParsedSignal, PlannedLeg
 from .outbox import already_handled, archive, list_new_signals, load_signal
-from .strategies import plan_trades
+from .strategies import breakeven_price, plan_trades
 
 _LOG = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ class ChartEngine:
 
     def poll_once(self) -> list[tuple[CatalogSignal, list[PlannedLeg]]]:
         groups = {g.chat_id: g for g in read_chart_inputs(self.cfg.common_files_dir, self.cfg.groups)}
-        executed: list[tuple[CatalogSignal, list[PlannedLeg]]] = []
+        sent: list[tuple[CatalogSignal, list[PlannedLeg]]] = []
         for path in list_new_signals(self.cfg.outbox_dir):
             if already_handled(path, self.cfg.processed_dir, self.cfg.skipped_dir):
                 _LOG.info("Duplicate %s already handled — discarded", path.stem)
@@ -55,8 +56,14 @@ class ChartEngine:
                 entry=rec.entry,
             )
             legs = plan_trades(parsed, strategy, group.lot)
+            if not legs:
+                _LOG.warning("Skip %s — strategy %s produced no legs", rec.id, strategy.id)
+                archive(path, self.cfg.skipped_dir)
+                continue
+            trigger = breakeven_price(parsed, strategy)
+            write_command(self.cfg.common_files_dir, group.slot, rec, legs, trigger)
             _LOG.info(
-                "Execute %s [%s | %s] strategy=%s (%s) lot=%s legs=%s %s %s",
+                "Sent %s to chart [%s | %s] strategy=%s (%s) lot=%s legs=%s %s breakeven-at=%s",
                 rec.id,
                 rec.group_title,
                 rec.group_id,
@@ -65,11 +72,11 @@ class ChartEngine:
                 group.lot,
                 len(legs),
                 rec.side.value,
-                rec.symbol,
+                trigger,
             )
             for leg in legs:
                 _LOG.info(
-                    "  %s %s lot=%s entry=%s sl=%s tp%s=%s%s",
+                    "  %s %s lot=%s entry=%s sl=%s tp%s=%s",
                     rec.side.value,
                     leg.entry_type,
                     leg.lot,
@@ -77,8 +84,7 @@ class ChartEngine:
                     leg.sl,
                     leg.tp_index,
                     leg.tp,
-                    " BE-trigger" if leg.is_breakeven_trigger else "",
                 )
             archive(path, self.cfg.processed_dir)
-            executed.append((rec, legs))
-        return executed
+            sent.append((rec, legs))
+        return sent

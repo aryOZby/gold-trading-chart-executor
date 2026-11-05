@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parent.parent
 class AppConfig:
     timezone: str
     tz: ZoneInfo
-    dry_run: bool
     outbox_dir: Path
     processed_dir: Path
     skipped_dir: Path
@@ -27,7 +26,6 @@ class AppConfig:
     common_files_dir: Path
     data_dir: Path
     logs_dir: Path
-    broker_type: str
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -55,7 +53,6 @@ def load_config(path: Path | None = None) -> AppConfig:
     return AppConfig(
         timezone=tz_name,
         tz=ZoneInfo(tz_name),
-        dry_run=bool(raw.get("dry_run", True)),
         outbox_dir=Path(str(listener.get("outbox_dir") or "")),
         processed_dir=ROOT / str(listener.get("processed_dir") or "data/processed"),
         skipped_dir=ROOT / str(listener.get("skipped_dir") or "data/skipped"),
@@ -65,7 +62,6 @@ def load_config(path: Path | None = None) -> AppConfig:
         common_files_dir=Path(common) if common else Path("."),
         data_dir=ROOT / str(paths.get("data_dir") or "data"),
         logs_dir=ROOT / str(paths.get("logs_dir") or "logs"),
-        broker_type=str(broker.get("type") or "dry_run"),
     )
 
 

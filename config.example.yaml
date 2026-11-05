@@ -1,5 +1,4 @@
 timezone: Asia/Jerusalem
-dry_run: true
 
 listener:
   # Folder the Telegram Group Listener writes to (data/outbox).
@@ -45,8 +44,9 @@ groups:
 # Playbooks 1–5 live in strategies.yaml. Chart Inputs pick the number per group.
 
 broker:
-  type: dry_run
-  common_files_dir: ""
+  # MT5 Common\Files. The EA reads orders from here and writes its Inputs here.
+  # Dry run, Friday close, and the 50-pip guard are EA Inputs on the chart.
+  common_files_dir: C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files
 
 paths:
   data_dir: data

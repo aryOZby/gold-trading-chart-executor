@@ -45,6 +45,22 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe main.py
 ```
 
-Point `listener.outbox_dir` at the listener `data\outbox` folder. Each signal file is moved to `data\processed` or `data\skipped` after it is handled; a file whose name is already there is treated as a duplicate and discarded. Compile `mt5/GoldChartExecutor.mq5` and attach it to XAUUSD. Trade stays off until you enable a group in Inputs.
+Point `listener.outbox_dir` at the listener `data\outbox` folder and `broker.common_files_dir` at MT5 `Common\Files`. Each signal file is moved to `data\processed` or `data\skipped` after it is handled; a file whose name is already there is treated as a duplicate and discarded. Compile `mt5/GoldChartExecutor.mq5` and attach it to XAUUSD. Trade stays off until you enable a group in Inputs, and **Dry run** is on until you turn it off.
 
-This stage classifies and plans orders from the listener. Live MT5 fills follow after the playbooks are confirmed on the chart.
+## How orders reach the chart
+
+Python writes one order file per signal to `Common\Files\gt_cmd\<slot>-<msg id>.txt`. The EA reads it, deletes it, and opens the legs with magic `270100 + slot`. Python never talks to MT5 directly.
+
+## Protections
+
+All protections run inside the EA, so they keep working when Python is stopped. They only touch positions and orders with this EA's magics (`270101`–`270106`).
+
+| Protection | Behaviour |
+|---|---|
+| Breakeven | When price touches the strategy's breakeven TP, every open leg of that signal gets SL = its entry price and any unfilled limit is deleted. If the broker refuses the stop, the leg is closed. Tracking survives EA restarts (`gt_state\`). |
+| Missing SL/TP | A position without SL or TP for more than 5 seconds gets SL and TP 50 pips (5.00 on XAUUSD) from its open price. If price is already beyond that stop, the position is closed. |
+| Friday close | From Friday 23:30 Israel time until Monday 00:00 Israel, all positions are closed, pending orders deleted, and new signals are refused. Israel summer/winter time is calculated in the EA. |
+| Stale signals | Signals older than 5 minutes are not opened. |
+| Dry run | On by default: signals are logged in the Experts tab, no orders are sent. The guard and Friday close still run. |
+
+Distances, times, and the age limit are EA Inputs.

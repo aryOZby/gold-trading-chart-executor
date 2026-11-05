@@ -22,6 +22,7 @@ def load_signal(path: Path) -> CatalogSignal:
         group_name=str(group.get("name") or ""),
         group_id=int(group["id"]),
         group_title=str(group.get("title") or ""),
+        telegram_msg_id=int(raw["telegram_msg_id"]),
         received_at=datetime.fromisoformat(raw["received_at"]),
         side=Side.BUY if str(raw["side"]).upper() == "BUY" else Side.SELL,
         symbol=str(raw["symbol"]),

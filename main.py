@@ -29,10 +29,10 @@ def main() -> int:
         return 1
     setup_logging(cfg.logs_dir)
     _LOG.info(
-        "Chart executor start dry_run=%s strategies=%s outbox=%s",
-        cfg.dry_run,
+        "Chart executor start strategies=%s outbox=%s chart=%s",
         ",".join(str(i) for i in sorted(cfg.strategies)),
         cfg.outbox_dir,
+        cfg.common_files_dir,
     )
     engine = ChartEngine(cfg)
     if args.once:

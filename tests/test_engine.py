@@ -27,7 +27,6 @@ def _cfg(tmp_path: Path) -> AppConfig:
     return AppConfig(
         timezone="Asia/Jerusalem",
         tz=ZoneInfo("Asia/Jerusalem"),
-        dry_run=True,
         outbox_dir=tmp_path / "outbox",
         processed_dir=tmp_path / "processed",
         skipped_dir=tmp_path / "skipped",
@@ -39,7 +38,6 @@ def _cfg(tmp_path: Path) -> AppConfig:
         common_files_dir=tmp_path / "common",
         data_dir=tmp_path / "data",
         logs_dir=tmp_path / "logs",
-        broker_type="dry_run",
     )
 
 
@@ -69,12 +67,36 @@ def test_listener_file_planned_with_chart_lot_and_strategy(tmp_path: Path):
     assert not list(cfg.outbox_dir.glob("*.json"))
 
 
+def test_order_file_written_for_ea(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    _chart(cfg, "2=1,0.05,1\n")
+    _drop(cfg)
+    ChartEngine(cfg).poll_once()
+    cmd_dir = cfg.common_files_dir / "gt_cmd"
+    assert not list(cmd_dir.glob("*.tmp"))
+    lines = (cmd_dir / "2-501.txt").read_text(encoding="ascii").splitlines()
+    assert lines == [
+        "key=2-501",
+        "slot=2",
+        "side=SELL",
+        "entry_type=market",
+        "entry=4315.0",
+        "sl=4327.0",
+        "trigger=4300.0",
+        "received_at=1793866500",
+        "leg=4|4300.0",
+        "leg=5|4295.0",
+        "leg=6|4285.0",
+    ]
+
+
 def test_trade_off_moves_signal_to_skipped(tmp_path: Path):
     cfg = _cfg(tmp_path)
     _chart(cfg, "2=0,0.05,1\n")
     _drop(cfg)
     assert ChartEngine(cfg).poll_once() == []
     assert (cfg.skipped_dir / "-1001569906975_501.json").exists()
+    assert not (cfg.common_files_dir / "gt_cmd").exists()
 
 
 def test_same_signal_twice_is_executed_once(tmp_path: Path):

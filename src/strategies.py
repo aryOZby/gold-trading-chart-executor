@@ -64,6 +64,14 @@ def plan_trades(parsed: ParsedSignal, strategy: Strategy, lot: float) -> list[Pl
     ]
 
 
+def breakeven_price(parsed: ParsedSignal, strategy: Strategy) -> float | None:
+    """TP price that, once touched, moves every leg's SL to its entry."""
+    index = _breakeven_tp_index(list(enumerate(parsed.tps, start=1)), strategy)
+    if index is None:
+        return None
+    return parsed.tps[index - 1]
+
+
 def _breakeven_tp_index(indexed: list[tuple[int, float]], strategy: Strategy) -> int | None:
     if not indexed:
         return None

@@ -1,5 +1,5 @@
 from src.parser import parse_signal
-from src.strategies import load_strategies, plan_trades
+from src.strategies import breakeven_price, load_strategies, plan_trades
 
 STRATEGIES = load_strategies()
 
@@ -111,3 +111,11 @@ def test_strategy_5_double_header_last_three():
     assert parsed.entry == 4164
     assert [leg.tp for leg in legs] == [4152, 4149, 4143]
     assert all(leg.entry_type == "market" for leg in legs)
+
+
+def test_breakeven_price_per_strategy():
+    expected = {1: (S1, 4300), 2: (S2, 4418), 3: (S3, 4122), 4: (S4, 4130), 5: (S5, 4152)}
+    for strategy_id, (text, price) in expected.items():
+        parsed = parse_signal(text)
+        assert parsed is not None
+        assert breakeven_price(parsed, STRATEGIES[strategy_id]) == price

@@ -66,6 +66,7 @@ class CatalogSignal:
     group_name: str
     group_id: int
     group_title: str
+    telegram_msg_id: int
     received_at: datetime
     side: Side
     symbol: str
