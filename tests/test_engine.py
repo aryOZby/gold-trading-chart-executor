@@ -99,6 +99,17 @@ def test_trade_off_moves_signal_to_skipped(tmp_path: Path):
     assert not (cfg.common_files_dir / "gt_cmd").exists()
 
 
+def test_signal_waits_while_chart_inputs_are_unreadable(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    _chart(cfg, "")
+    _drop(cfg)
+    engine = ChartEngine(cfg)
+    assert engine.poll_once() == []
+    assert (cfg.outbox_dir / "-1001569906975_501.json").exists()
+    _chart(cfg, "2=1,0.05,1\n")
+    assert len(engine.poll_once()) == 1
+
+
 def test_same_signal_twice_is_executed_once(tmp_path: Path):
     cfg = _cfg(tmp_path)
     _chart(cfg, "2=1,0.05,1\n")

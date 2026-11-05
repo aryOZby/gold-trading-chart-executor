@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from .chart_inputs import read_chart_inputs
+from .chart_inputs import describe, read_chart_inputs
 from .commands import write_command
 from .config import AppConfig
 from .models import CatalogSignal, ParsedSignal, PlannedLeg
@@ -15,9 +15,18 @@ _LOG = logging.getLogger(__name__)
 class ChartEngine:
     def __init__(self, cfg: AppConfig):
         self.cfg = cfg
+        self._last_inputs = ""
 
     def poll_once(self) -> list[tuple[CatalogSignal, list[PlannedLeg]]]:
-        groups = {g.chat_id: g for g in read_chart_inputs(self.cfg.common_files_dir, self.cfg.groups)}
+        slots = read_chart_inputs(self.cfg.common_files_dir, self.cfg.groups)
+        if slots is None:
+            _LOG.warning("Chart Inputs file is incomplete — waiting for the next poll")
+            return []
+        summary = describe(slots)
+        if summary != self._last_inputs:
+            _LOG.info("Chart Inputs: %s", summary)
+            self._last_inputs = summary
+        groups = {g.chat_id: g for g in slots}
         sent: list[tuple[CatalogSignal, list[PlannedLeg]]] = []
         for path in list_new_signals(self.cfg.outbox_dir):
             if already_handled(path, self.cfg.processed_dir, self.cfg.skipped_dir):

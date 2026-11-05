@@ -40,7 +40,11 @@ def main() -> int:
         return 0
     try:
         while True:
-            engine.poll_once()
+            try:
+                engine.poll_once()
+            except Exception:
+                # A locked or odd file must not stop execution; the next poll retries.
+                _LOG.exception("Poll failed — retrying")
             time.sleep(cfg.poll_seconds)
     except KeyboardInterrupt:
         _LOG.info("Interrupted")

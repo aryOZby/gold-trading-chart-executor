@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "2.00"
+#property version   "2.01"
 #property description "Chart Executor: per-group Inputs, orders, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -185,7 +185,6 @@ void OnTick()
 
 void OnTimer()
 {
-   WriteChart();
    WeekendClose();
    ProcessCommands();
    ManageBreakeven();
@@ -305,7 +304,11 @@ void WriteChart()
       SlotLine(4, InpTrade4, InpLot4, InpStrat4) + "\n" +
       SlotLine(5, InpTrade5, InpLot5, InpStrat5) + "\n" +
       SlotLine(6, InpTrade6, InpLot6, InpStrat6) + "\n";
-   WriteTextFile("gs_chart.txt", body, true);
+   // Inputs only change through a restart, so this runs once from OnInit.
+   // Written via a temp file so Python never reads a half-written copy.
+   WriteTextFile("gs_chart.tmp", body, true);
+   if(!FileMove("gs_chart.tmp", FILE_COMMON, "gs_chart.txt", FILE_COMMON|FILE_REWRITE))
+      PrintFormat("Could not update gs_chart.txt: error %d", GetLastError());
 }
 
 // ---------------------------------------------------------------- Signal state
