@@ -1,0 +1,49 @@
+# Gold Trading — Chart Executor
+
+Execution service for the gold-trading desk. It does not listen to Telegram.
+
+| Service | Role |
+|---|---|
+| [Telegram Group Listener](https://github.com/aryOZby/gold-signal-listener) | Catalog incoming XAUUSD calls by chat id |
+| **Chart Executor** (this repo) | Pull those calls and open trades from the chart |
+
+The Expert Advisor sits on gold. Its Inputs are the operator controls for each group:
+
+- **Trade** — on/off for opening positions
+- **Lot** — volume per position
+- **Strategy** — playbook `1`–`5` from `strategies.yaml`
+
+## Strategies
+
+| # | Entry | Positions | Take-profits | Move SL to entry |
+|---|---|---|---|---|
+| 1 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
+| 2 | Limit at first header price | One per TP row | Every TP row | After the first TP |
+| 3 | Limit at first header price | 2 | Two farthest TPs | After the 2nd TP from the end |
+| 4 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
+| 5 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
+
+All legs share the signal SL. Lot comes from the chart Input for that group.
+
+## Chart slots
+
+1. VIP SIGNALS ROOM (LIFETIME)
+2. Technical Pips
+3. profit__kings
+4. GOLD SNIPER
+5. Trade With Samder
+6. GOLD BULLET SIGNALS
+
+## Setup
+
+```bat
+cd C:\Users\Administrator\gold-trading-chart-executor
+copy config.example.yaml config.yaml
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe main.py
+```
+
+Point `listener.outbox_dir` at the listener `data\outbox` folder. Compile `mt5/GoldChartExecutor.mq5` and attach it to XAUUSD. Trade stays off until you enable a group in Inputs.
+
+This stage classifies and plans orders from the listener. Live MT5 fills follow after the playbooks are confirmed on the chart.

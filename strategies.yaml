@@ -1,0 +1,37 @@
+# Gold Trading — numbered playbooks. Chart Inputs pick one per group (1–5).
+strategies:
+  1:
+    name: "Classic XAUUSD market — last 3 TPs"
+    entry: market
+    take: last
+    take_count: 3
+    breakeven: from_end
+    breakeven_index: 3
+  2:
+    name: "PLAN limit — every TP row"
+    entry: limit
+    take: all
+    take_count: 0
+    breakeven: first
+    breakeven_index: 1
+  3:
+    name: "Sniper limit — 2 farthest TPs"
+    entry: limit
+    take: farthest
+    take_count: 2
+    breakeven: from_end
+    breakeven_index: 2
+  4:
+    name: "GOLD slash market — last 3 TPs"
+    entry: market
+    take: last
+    take_count: 3
+    breakeven: from_end
+    breakeven_index: 3
+  5:
+    name: "Double-header market — last 3 TPs"
+    entry: market
+    take: last
+    take_count: 3
+    breakeven: from_end
+    breakeven_index: 3

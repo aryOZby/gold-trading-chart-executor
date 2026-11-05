@@ -1,0 +1,13 @@
+.tools/
+.env
+config.yaml
+config.yaml.bak
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+data/
+logs/
+reports/
+*.pyc
+.DS_Store
