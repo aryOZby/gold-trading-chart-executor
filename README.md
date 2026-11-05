@@ -1,18 +1,25 @@
 # Gold Trading — Chart Executor
 
-Execution service for the gold-trading desk. It does not listen to Telegram and does not build reports.
+Execution service for the gold-trading desk: one MT5 Expert Advisor, no extra process. It does not listen to Telegram and does not build reports.
 
 | Service | Role |
 |---|---|
 | [Telegram Group Listener](https://github.com/aryOZby/gold-signal-listener) | Listen to groups by chat id and hand off each recognized signal |
-| **Chart Executor** (this repo) | Pull those signals and trade them from the chart |
+| **Chart Executor** (this repo) | Read those signals on the MT5 chart and trade them |
 | Reporting (planned) | Build monthly Excel tables per group and email them |
 
-The Expert Advisor sits on gold. Its Inputs are the operator controls for each group:
+The EA sits on a gold chart (`XAUUSD`, `XAUUSD.s`, …) and trades the chart symbol. Its Inputs are the operator controls for each group:
 
 - **Trade** — on/off for opening positions
 - **Lot** — volume per position
-- **Strategy** — playbook `1`–`5` from `strategies.yaml`
+- **Strategy** — playbook `1`–`5`
+- **Chat id** — the Telegram group feeding that slot
+
+Changes apply as soon as you press OK in Inputs.
+
+## Hand-off
+
+The listener writes each signal to MT5 `Common\Files\gt_signals\<chat_id>_<message_id>.json`. The EA picks it up within a fraction of a second and moves it to `gt_signals\done\` (opened, or logged in dry run) or `gt_signals\skipped\` (Trade off, stale, weekend, invalid). A file whose name is already in either folder is a duplicate and is deleted.
 
 ## Strategies
 
@@ -24,36 +31,22 @@ The Expert Advisor sits on gold. Its Inputs are the operator controls for each g
 | 4 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 | 5 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 
-All legs share the signal SL. Lot comes from the chart Input for that group.
+All legs share the signal SL. A limit leg becomes a market order when price is already at or past the entry.
 
 ## Chart slots
 
-1. VIP SIGNALS ROOM (LIFETIME)
-2. Technical Pips
-3. profit__kings
-4. GOLD SNIPER
-5. Trade With Samder
-6. GOLD BULLET SIGNALS
-
-## Setup
-
-```bat
-cd C:\Users\Administrator\gold-trading-chart-executor
-copy config.example.yaml config.yaml
-py -3 -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe main.py
-```
-
-Point `listener.outbox_dir` at the listener `data\outbox` folder and `broker.common_files_dir` at MT5 `Common\Files`. Each signal file is moved to `data\processed` or `data\skipped` after it is handled; a file whose name is already there is treated as a duplicate and discarded. Compile `mt5/GoldChartExecutor.mq5` and attach it to XAUUSD. Trade stays off until you enable a group in Inputs, and **Dry run** is on until you turn it off.
-
-## How orders reach the chart
-
-Python writes one order file per signal to `Common\Files\gt_cmd\<slot>-<msg id>.txt`. The EA reads it, deletes it, and opens the legs with magic `270100 + slot`. Python never talks to MT5 directly.
+| Slot | Group | Chat id | Magic |
+|---|---|---|---|
+| 1 | VIP SIGNALS ROOM (LIFETIME) | -1002001216034 | 270101 |
+| 2 | Technical Pips | -1001569906975 | 270102 |
+| 3 | profit__kings | -1002984909577 | 270103 |
+| 4 | GOLD SNIPER | -1001754381715 | 270104 |
+| 5 | Trade With Samder | -1002366136201 | 270105 |
+| 6 | GOLD BULLET SIGNALS | -1003186082440 | 270106 |
 
 ## Protections
 
-All protections run inside the EA, so they keep working when Python is stopped. They only touch positions and orders with this EA's magics (`270101`–`270106`).
+They only touch positions and orders with this EA's magics.
 
 | Protection | Behaviour |
 |---|---|
@@ -61,6 +54,12 @@ All protections run inside the EA, so they keep working when Python is stopped. 
 | Missing SL/TP | A position without SL or TP for more than 5 seconds gets SL and TP 50 pips (5.00 on XAUUSD) from its open price. If price is already beyond that stop, the position is closed. |
 | Friday close | From Friday 23:30 Israel time until Monday 00:00 Israel, all positions are closed, pending orders deleted, and new signals are refused. Israel summer/winter time is calculated in the EA. |
 | Stale signals | Signals older than 5 minutes are not opened. |
-| Dry run | On by default: signals are logged in the Experts tab, no orders are sent. The guard and Friday close still run. |
+| Dry run | Signals are logged in the Experts tab and no orders are sent. The guard and Friday close still run. |
 
 Distances, times, and the age limit are EA Inputs.
+
+## Setup
+
+1. In the listener `config.yaml`, set `paths.outbox_dir` to `C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files\gt_signals` and restart the listener.
+2. Copy `mt5/GoldChartExecutor.mq5` to the terminal's `MQL5\Experts`, compile with F7, and attach it to a gold chart with Algo Trading allowed.
+3. Enable Trade for the groups you want in Inputs.

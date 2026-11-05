@@ -1,32 +1,38 @@
 #property copyright "Gold Trading"
-#property version   "2.01"
-#property description "Chart Executor: per-group Inputs, orders, breakeven, 50-pip guard, Friday close"
+#property version   "3.00"
+#property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
 
 input bool   InpTrade1 = false; // Trade VIP SIGNALS ROOM
 input double InpLot1   = 0.01;  // Lot VIP SIGNALS ROOM
 input int    InpStrat1 = 1;     // Strategy VIP SIGNALS ROOM (1-5)
+input long   InpChat1  = -1002001216034; // Chat id VIP SIGNALS ROOM
 
 input bool   InpTrade2 = false; // Trade Technical Pips
 input double InpLot2   = 0.01;  // Lot Technical Pips
 input int    InpStrat2 = 1;     // Strategy Technical Pips (1-5)
+input long   InpChat2  = -1001569906975; // Chat id Technical Pips
 
 input bool   InpTrade3 = false; // Trade profit__kings
 input double InpLot3   = 0.01;  // Lot profit__kings
 input int    InpStrat3 = 2;     // Strategy profit__kings (1-5)
+input long   InpChat3  = -1002984909577; // Chat id profit__kings
 
 input bool   InpTrade4 = false; // Trade GOLD SNIPER
 input double InpLot4   = 0.01;  // Lot GOLD SNIPER
 input int    InpStrat4 = 3;     // Strategy GOLD SNIPER (1-5)
+input long   InpChat4  = -1001754381715; // Chat id GOLD SNIPER
 
 input bool   InpTrade5 = false; // Trade Trade With Samder
 input double InpLot5   = 0.01;  // Lot Trade With Samder
 input int    InpStrat5 = 1;     // Strategy Trade With Samder (1-5)
+input long   InpChat5  = -1002366136201; // Chat id Trade With Samder
 
 input bool   InpTrade6 = false; // Trade GOLD BULLET SIGNALS
 input double InpLot6   = 0.01;  // Lot GOLD BULLET SIGNALS
 input int    InpStrat6 = 1;     // Strategy GOLD BULLET SIGNALS (1-5)
+input long   InpChat6  = -1003186082440; // Chat id GOLD BULLET SIGNALS
 
 input bool   InpDryRun            = true; // Dry run (log only, no orders)
 input double InpPipSize           = 0.1;  // Pip size (XAUUSD = 0.1)
@@ -41,7 +47,9 @@ input int    InpTimerMs           = 200;  // Timer ms
 #define MAGIC_BASE 270100
 #define SLOTS      6
 #define MAX_LEGS   12
-#define CMD_DIR    "gt_cmd\\"
+#define SIG_DIR    "gt_signals\\"
+#define DONE_DIR   "gt_signals\\done\\"
+#define SKIP_DIR   "gt_signals\\skipped\\"
 #define STATE_DIR  "gt_state\\"
 #define STATE_GRACE_SEC 60
 
@@ -87,6 +95,42 @@ double SlotLot(const int slot)
       case 6: return InpLot6;
    }
    return 0.0;
+}
+
+int SlotStrategy(const int slot)
+{
+   switch(slot)
+   {
+      case 1: return InpStrat1;
+      case 2: return InpStrat2;
+      case 3: return InpStrat3;
+      case 4: return InpStrat4;
+      case 5: return InpStrat5;
+      case 6: return InpStrat6;
+   }
+   return 0;
+}
+
+long SlotChat(const int slot)
+{
+   switch(slot)
+   {
+      case 1: return InpChat1;
+      case 2: return InpChat2;
+      case 3: return InpChat3;
+      case 4: return InpChat4;
+      case 5: return InpChat5;
+      case 6: return InpChat6;
+   }
+   return 0;
+}
+
+int SlotForChat(const long chatId)
+{
+   for(int slot = 1; slot <= SLOTS; slot++)
+      if(SlotChat(slot) == chatId)
+         return slot;
+   return 0;
 }
 
 int ClampStrategy(const int value)
@@ -160,12 +204,13 @@ bool InWeekendBlock()
 int OnInit()
 {
    trade.SetDeviationInPoints(InpDeviation);
-   FolderCreate("gt_cmd", FILE_COMMON);
+   FolderCreate("gt_signals", FILE_COMMON);
+   FolderCreate("gt_signals\\done", FILE_COMMON);
+   FolderCreate("gt_signals\\skipped", FILE_COMMON);
    FolderCreate("gt_state", FILE_COMMON);
    LoadStates();
    if(!EventSetMillisecondTimer(InpTimerMs))
       EventSetTimer(1);
-   WriteChart();
    PrintFormat("GoldChartExecutor started: symbol=%s mode=%s tracked=%d",
                _Symbol, (InpDryRun ? "DRY RUN" : "LIVE"), ArraySize(sKey));
    ShowStatus();
@@ -186,7 +231,7 @@ void OnTick()
 void OnTimer()
 {
    WeekendClose();
-   ProcessCommands();
+   ProcessSignals();
    ManageBreakeven();
    SafetyGuard();
    CleanupStates();
@@ -283,32 +328,6 @@ void WriteTextFile(const string name, const string body, const bool common)
       return;
    FileWriteString(h, body);
    FileClose(h);
-}
-
-// ---------------------------------------------------------------- Chart Inputs → Python
-
-string SlotLine(const int slot, const bool on, const double lot, const int strategy)
-{
-   return IntegerToString(slot) + "=" +
-          IntegerToString(on ? 1 : 0) + "," +
-          DoubleToString(lot, 4) + "," +
-          IntegerToString(ClampStrategy(strategy));
-}
-
-void WriteChart()
-{
-   string body =
-      SlotLine(1, InpTrade1, InpLot1, InpStrat1) + "\n" +
-      SlotLine(2, InpTrade2, InpLot2, InpStrat2) + "\n" +
-      SlotLine(3, InpTrade3, InpLot3, InpStrat3) + "\n" +
-      SlotLine(4, InpTrade4, InpLot4, InpStrat4) + "\n" +
-      SlotLine(5, InpTrade5, InpLot5, InpStrat5) + "\n" +
-      SlotLine(6, InpTrade6, InpLot6, InpStrat6) + "\n";
-   // Inputs only change through a restart, so this runs once from OnInit.
-   // Written via a temp file so Python never reads a half-written copy.
-   WriteTextFile("gs_chart.tmp", body, true);
-   if(!FileMove("gs_chart.tmp", FILE_COMMON, "gs_chart.txt", FILE_COMMON|FILE_REWRITE))
-      PrintFormat("Could not update gs_chart.txt: error %d", GetLastError());
 }
 
 // ---------------------------------------------------------------- Signal state
@@ -450,17 +469,184 @@ void CleanupStates()
    }
 }
 
-// ---------------------------------------------------------------- Orders from Python
+// ---------------------------------------------------------------- Strategies 1-5
 
-void ProcessCommands()
+// entry: 0 market, 1 limit at the first header price.
+// take: 0 every TP row, 1 last <count> rows, 2 <count> rows farthest from the zone middle.
+// be: 0 first TP row, 1 the <beIdx>-th TP row from the end. All legs share the signal SL.
+bool GetStrategy(const int id, int &entry, int &take, int &count, int &be, int &beIdx)
+{
+   switch(id)
+   {
+      case 1: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // #XAUUSD SELL 4315-4318
+      case 2: entry = 1; take = 0; count = 0; be = 0; beIdx = 1; return true; // XAUUSD SELL PLAN @4365_4368
+      case 3: entry = 1; take = 2; count = 2; be = 1; beIdx = 2; return true; // XAUUSD SELL 4083 / MORE SELL
+      case 4: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // GOLD SELL 4146/4150
+      case 5: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // double #XAUUSD header
+   }
+   return false;
+}
+
+double TpDistance(const double &tps[], const int row, const bool isBuy, const double mid)
+{
+   return isBuy ? tps[row - 1] - mid : mid - tps[row - 1];
+}
+
+// Fills chosen[] with 1-based TP rows and returns the breakeven TP row.
+int PlanLegs(const double &tps[], const bool isBuy, const double mid, const int take,
+             const int count, const int be, const int beIdx, int &chosen[])
+{
+   int n = ArraySize(tps);
+   ArrayResize(chosen, 0);
+   if(n == 0)
+      return 0;
+   int k = (count > 0 && count < n) ? count : n;
+   if(take == 0)
+   {
+      ArrayResize(chosen, n);
+      for(int i = 0; i < n; i++)
+         chosen[i] = i + 1;
+   }
+   else if(take == 1)
+   {
+      ArrayResize(chosen, k);
+      for(int i = 0; i < k; i++)
+         chosen[i] = n - k + 1 + i;
+   }
+   else
+   {
+      int order[];
+      ArrayResize(order, n);
+      for(int i = 0; i < n; i++)
+         order[i] = i + 1;
+      // Farthest first; on equal distance the later row wins.
+      for(int i = 0; i < n - 1; i++)
+         for(int j = i + 1; j < n; j++)
+         {
+            double dj = TpDistance(tps, order[j], isBuy, mid);
+            double di = TpDistance(tps, order[i], isBuy, mid);
+            if(dj > di || (dj == di && order[j] > order[i]))
+            {
+               int tmp = order[i];
+               order[i] = order[j];
+               order[j] = tmp;
+            }
+         }
+      ArrayResize(chosen, k);
+      for(int i = 0; i < k; i++)
+         chosen[i] = order[i];
+      ArraySort(chosen);
+   }
+   if(be == 0 || beIdx <= 0 || beIdx > n)
+      return 1;
+   return n - beIdx + 1;
+}
+
+// ---------------------------------------------------------------- Signals from the listener
+
+string ReadAll(const string path)
+{
+   int h = FileOpen(path, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ, 0, CP_UTF8);
+   if(h == INVALID_HANDLE)
+      return "";
+   string text = "";
+   while(!FileIsEnding(h))
+      text += FileReadString(h) + "\n";
+   FileClose(h);
+   return text;
+}
+
+bool IsBlank(const ushort c)
+{
+   return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+// Minimal reader for the listener's flat JSON: first occurrence of "key", as raw text.
+// Strings come back without quotes, arrays without brackets.
+string JsonValue(const string &js, const string key)
+{
+   int pos = StringFind(js, "\"" + key + "\"");
+   if(pos < 0)
+      return "";
+   pos = StringFind(js, ":", pos);
+   if(pos < 0)
+      return "";
+   int len = StringLen(js);
+   pos++;
+   while(pos < len && IsBlank(StringGetCharacter(js, pos)))
+      pos++;
+   if(pos >= len)
+      return "";
+   ushort c = StringGetCharacter(js, pos);
+   int end;
+   if(c == '"')
+   {
+      end = StringFind(js, "\"", pos + 1);
+      return end < 0 ? "" : StringSubstr(js, pos + 1, end - pos - 1);
+   }
+   if(c == '[')
+   {
+      end = StringFind(js, "]", pos);
+      return end < 0 ? "" : StringSubstr(js, pos + 1, end - pos - 1);
+   }
+   end = pos;
+   while(end < len)
+   {
+      ushort d = StringGetCharacter(js, end);
+      if(d == ',' || d == '}' || d == '\n' || d == '\r')
+         break;
+      end++;
+   }
+   string v = StringSubstr(js, pos, end - pos);
+   StringTrimLeft(v);
+   StringTrimRight(v);
+   return v;
+}
+
+// "2026-11-05T13:16:19.699123+00:00" -> GMT seconds.
+long ParseIsoUtc(const string iso)
+{
+   if(StringLen(iso) < 19)
+      return 0;
+   string s = StringSubstr(iso, 0, 19);
+   StringReplace(s, "T", " ");
+   StringReplace(s, "-", ".");
+   long t = (long)StringToTime(s);
+   int len = StringLen(iso);
+   for(int i = 19; i < len; i++)
+   {
+      ushort c = StringGetCharacter(iso, i);
+      if(c != '+' && c != '-')
+         continue;
+      if(len >= i + 6)
+      {
+         int sign = (c == '-') ? -1 : 1;
+         int hh = (int)StringToInteger(StringSubstr(iso, i + 1, 2));
+         int mm = (int)StringToInteger(StringSubstr(iso, i + 4, 2));
+         t -= sign * (hh * 3600 + mm * 60);
+      }
+      break;
+   }
+   return t;
+}
+
+void Archive(const string name, const string dir)
+{
+   if(!FileMove(SIG_DIR + name, FILE_COMMON, dir + name, FILE_COMMON|FILE_REWRITE))
+      FileDelete(SIG_DIR + name, FILE_COMMON);
+}
+
+void ProcessSignals()
 {
    string names[];
    string name;
-   long h = FileFindFirst(CMD_DIR + "*.txt", name, FILE_COMMON);
+   long h = FileFindFirst(SIG_DIR + "*.json", name, FILE_COMMON);
    if(h == INVALID_HANDLE)
       return;
    do
    {
+      if(StringFind(name, ".tmp") >= 0)
+         continue;
       int n = ArraySize(names);
       ArrayResize(names, n + 1);
       names[n] = name;
@@ -468,118 +654,155 @@ void ProcessCommands()
    while(FileFindNext(h, name));
    FileFindClose(h);
    for(int i = 0; i < ArraySize(names); i++)
-      HandleCommand(names[i]);
+      HandleSignal(names[i]);
 }
 
-void HandleCommand(const string name)
+void Skip(const string name, const string why)
 {
-   string path = CMD_DIR + name;
-   string lines[];
-   if(!ReadLines(path, lines))
+   PrintFormat("Skip %s: %s", name, why);
+   Archive(name, SKIP_DIR);
+}
+
+void HandleSignal(const string name)
+{
+   string path = SIG_DIR + name;
+   if(FileIsExist(DONE_DIR + name, FILE_COMMON) || FileIsExist(SKIP_DIR + name, FILE_COMMON))
+   {
+      PrintFormat("Duplicate %s already handled — discarded", name);
+      FileDelete(path, FILE_COMMON);
       return;
-   // Delete first: a command is acted on at most once, even if opening fails.
-   FileDelete(path, FILE_COMMON);
-
-   string key = "", side = "", entryType = "market";
-   int slot = 0;
-   double entry = 0.0, sl = 0.0, trigger = 0.0;
-   long receivedAt = 0;
-   int legIdx[];
-   double legTp[];
-   for(int i = 0; i < ArraySize(lines); i++)
-   {
-      string k, v;
-      if(!SplitKV(lines[i], k, v))
-         continue;
-      if(k == "key")
-         key = v;
-      else if(k == "slot")
-         slot = (int)StringToInteger(v);
-      else if(k == "side")
-         side = v;
-      else if(k == "entry_type")
-         entryType = v;
-      else if(k == "entry")
-         entry = StringToDouble(v);
-      else if(k == "sl")
-         sl = StringToDouble(v);
-      else if(k == "trigger")
-         trigger = StringToDouble(v);
-      else if(k == "received_at")
-         receivedAt = StringToInteger(v);
-      else if(k == "leg")
-      {
-         string parts[];
-         if(StringSplit(v, '|', parts) == 2)
-         {
-            int n = ArraySize(legTp);
-            ArrayResize(legIdx, n + 1);
-            ArrayResize(legTp, n + 1);
-            legIdx[n] = (int)StringToInteger(parts[0]);
-            legTp[n] = StringToDouble(parts[1]);
-         }
-      }
    }
+   string js = ReadAll(path);
+   if(StringLen(js) == 0)
+      return;
 
-   bool isBuy = (side == "BUY");
-   if(key == "" || slot < 1 || slot > SLOTS || (side != "BUY" && side != "SELL") ||
-      sl <= 0.0 || ArraySize(legTp) == 0)
+   // File name is <chat_id>_<message_id>.json
+   string base = StringSubstr(name, 0, StringLen(name) - 5);
+   int us = -1;
+   for(int i = StringLen(base) - 1; i >= 0; i--)
+      if(StringGetCharacter(base, i) == '_')
+      {
+         us = i;
+         break;
+      }
+   if(us <= 0)
    {
-      PrintFormat("Rejected %s: incomplete order file", name);
+      Skip(name, "file name is not <chat_id>_<message_id>.json");
+      return;
+   }
+   long chatId = StringToInteger(StringSubstr(base, 0, us));
+   string msgId = StringSubstr(base, us + 1);
+   string title = JsonValue(js, "title");
+   string side = JsonValue(js, "side");
+   double entry = StringToDouble(JsonValue(js, "entry"));
+   double zoneLow = StringToDouble(JsonValue(js, "zone_low"));
+   double zoneHigh = StringToDouble(JsonValue(js, "zone_high"));
+   double sl = StringToDouble(JsonValue(js, "sl"));
+   long receivedAt = ParseIsoUtc(JsonValue(js, "received_at"));
+   double tps[];
+   string parts[];
+   int np = StringSplit(JsonValue(js, "tps"), ',', parts);
+   for(int i = 0; i < np; i++)
+   {
+      string p = parts[i];
+      StringTrimLeft(p);
+      StringTrimRight(p);
+      if(StringLen(p) == 0)
+         continue;
+      int n = ArraySize(tps);
+      ArrayResize(tps, n + 1);
+      tps[n] = StringToDouble(p);
+   }
+   if(entry <= 0.0)
+      entry = zoneLow;
+   if(zoneHigh <= 0.0)
+      zoneHigh = zoneLow;
+
+   int slot = SlotForChat(chatId);
+   if(slot == 0)
+   {
+      Skip(name, "chat " + IntegerToString(chatId) + " is not in any slot");
+      return;
+   }
+   string key = IntegerToString(slot) + "-" + msgId;
+   string who = title + " | slot " + IntegerToString(slot);
+   bool isBuy = (side == "BUY");
+   if((side != "BUY" && side != "SELL") || sl <= 0.0 || entry <= 0.0 || ArraySize(tps) == 0)
+   {
+      Skip(name, "incomplete signal from " + who);
       return;
    }
    if(InWeekendBlock())
    {
-      PrintFormat("Skip %s: weekend block (Friday close until Monday 00:00 Israel)", key);
+      Skip(name, "weekend block (Friday close until Monday 00:00 Israel)");
       return;
    }
    if(!SlotTrade(slot))
    {
-      PrintFormat("Skip %s: Trade is off for slot %d", key, slot);
+      Skip(name, "Trade is off for " + who);
       return;
    }
    if(receivedAt > 0 && (long)TimeGMT() - receivedAt > InpMaxSignalAgeSec)
    {
-      PrintFormat("Skip %s: signal is %d seconds old", key, (int)((long)TimeGMT() - receivedAt));
+      Skip(name, "signal from " + who + " is " +
+           IntegerToString((long)TimeGMT() - receivedAt) + " seconds old");
       return;
    }
    if(StateIndex(key) >= 0)
    {
-      PrintFormat("Skip %s: already opened", key);
+      Skip(name, "already opened");
       return;
    }
    if((isBuy && sl >= entry) || (!isBuy && sl <= entry))
    {
-      PrintFormat("Rejected %s: SL %.2f is on the wrong side of entry %.2f", key, sl, entry);
+      Skip(name, StringFormat("SL %.2f is on the wrong side of entry %.2f", sl, entry));
       return;
    }
-
+   int strategy = SlotStrategy(slot);
+   int sEntry, sTake, sCountN, sBeMode, sBeIdx;
+   if(!GetStrategy(strategy, sEntry, sTake, sCountN, sBeMode, sBeIdx))
+   {
+      Skip(name, "unknown strategy " + IntegerToString(strategy) + " for " + who);
+      return;
+   }
+   int rows[];
+   int beRow = PlanLegs(tps, isBuy, (zoneLow + zoneHigh) / 2.0, sTake, sCountN, sBeMode, sBeIdx, rows);
+   double trigger = tps[beRow - 1];
+   string entryType = (sEntry == 1) ? "limit" : "market";
    double volume = NormalizeVolume(_Symbol, SlotLot(slot));
+
+   string plan = "";
+   for(int l = 0; l < ArraySize(rows); l++)
+      plan += StringFormat(" TP%d=%.2f", rows[l], tps[rows[l] - 1]);
+   PrintFormat("%s %s from %s: S%d %s %s lot=%.2f entry=%.2f sl=%.2f breakeven-at=%.2f |%s",
+               (InpDryRun ? "DRY RUN" : "Signal"), key, who, strategy, side, entryType,
+               volume, entry, sl, trigger, plan);
    if(InpDryRun)
    {
-      PrintFormat("DRY RUN %s slot=%d %s %s legs=%d lot=%.2f entry=%.2f sl=%.2f breakeven-at=%.2f",
-                  key, slot, side, entryType, ArraySize(legTp), volume, entry, sl, trigger);
+      Archive(name, DONE_DIR);
       return;
    }
 
    trade.SetExpertMagicNumber(MAGIC_BASE + slot);
-   int i = AddState(key, isBuy ? 1 : -1, trigger, false);
-   for(int l = 0; l < ArraySize(legTp); l++)
+   int st = AddState(key, isBuy ? 1 : -1, trigger, false);
+   for(int l = 0; l < ArraySize(rows); l++)
    {
-      string comment = "GT" + key + "-TP" + IntegerToString(legIdx[l]);
-      ulong ticket = OpenLeg(isBuy, entryType, volume, entry, sl, legTp[l], comment);
+      string comment = "GT" + key + "-TP" + IntegerToString(rows[l]);
+      ulong ticket = OpenLeg(isBuy, entryType, volume, entry, sl, tps[rows[l] - 1], comment);
       if(ticket > 0)
-         AddTicket(i, ticket);
+         AddTicket(st, ticket);
    }
-   if(sCount[i] == 0)
+   // Acted on once, even when the broker refused: a retry would open late.
+   Archive(name, DONE_DIR);
+   if(sCount[st] == 0)
    {
       PrintFormat("Open FAILED for every leg of %s", key);
-      RemoveState(i);
+      RemoveState(st);
       return;
    }
-   SaveState(i);
+   SaveState(st);
    PrintFormat("Opened %s: %d/%d legs, lot=%.2f, breakeven-at=%.2f",
-               key, sCount[i], ArraySize(legTp), volume, trigger);
+               key, sCount[st], ArraySize(rows), volume, trigger);
 }
 
 // Limit when the price has not reached entry yet; otherwise the market is already at or
