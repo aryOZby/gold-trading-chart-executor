@@ -22,8 +22,6 @@ def load_signal(path: Path) -> CatalogSignal:
         group_name=str(group.get("name") or ""),
         group_id=int(group["id"]),
         group_title=str(group.get("title") or ""),
-        month=str(raw.get("month") or ""),
-        month_seq=int(raw.get("month_seq") or 0),
         received_at=datetime.fromisoformat(raw["received_at"]),
         side=Side.BUY if str(raw["side"]).upper() == "BUY" else Side.SELL,
         symbol=str(raw["symbol"]),
@@ -34,6 +32,10 @@ def load_signal(path: Path) -> CatalogSignal:
         tps=tuple(float(x) for x in raw.get("tps") or ()),
         raw_text=str(raw.get("raw_text") or ""),
     )
+
+
+def already_handled(path: Path, *dirs: Path) -> bool:
+    return any((d / path.name).exists() for d in dirs)
 
 
 def archive(path: Path, dest_dir: Path) -> Path:

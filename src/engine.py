@@ -5,7 +5,7 @@ import logging
 from .chart_inputs import read_chart_inputs
 from .config import AppConfig
 from .models import CatalogSignal, ParsedSignal, PlannedLeg
-from .outbox import archive, list_new_signals, load_signal
+from .outbox import already_handled, archive, list_new_signals, load_signal
 from .strategies import plan_trades
 
 _LOG = logging.getLogger(__name__)
@@ -19,6 +19,10 @@ class ChartEngine:
         groups = {g.chat_id: g for g in read_chart_inputs(self.cfg.common_files_dir, self.cfg.groups)}
         executed: list[tuple[CatalogSignal, list[PlannedLeg]]] = []
         for path in list_new_signals(self.cfg.outbox_dir):
+            if already_handled(path, self.cfg.processed_dir, self.cfg.skipped_dir):
+                _LOG.info("Duplicate %s already handled — discarded", path.stem)
+                path.unlink(missing_ok=True)
+                continue
             rec = load_signal(path)
             group = groups.get(rec.group_id)
             if group is None or not group.trade:

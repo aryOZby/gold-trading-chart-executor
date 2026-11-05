@@ -1,11 +1,12 @@
 # Gold Trading — Chart Executor
 
-Execution service for the gold-trading desk. It does not listen to Telegram.
+Execution service for the gold-trading desk. It does not listen to Telegram and does not build reports.
 
 | Service | Role |
 |---|---|
-| [Telegram Group Listener](https://github.com/aryOZby/gold-signal-listener) | Catalog incoming XAUUSD calls by chat id |
-| **Chart Executor** (this repo) | Pull those calls and open trades from the chart |
+| [Telegram Group Listener](https://github.com/aryOZby/gold-signal-listener) | Listen to groups by chat id and hand off each recognized signal |
+| **Chart Executor** (this repo) | Pull those signals and trade them from the chart |
+| Reporting (planned) | Build monthly Excel tables per group and email them |
 
 The Expert Advisor sits on gold. Its Inputs are the operator controls for each group:
 
@@ -44,6 +45,6 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe main.py
 ```
 
-Point `listener.outbox_dir` at the listener `data\outbox` folder. Compile `mt5/GoldChartExecutor.mq5` and attach it to XAUUSD. Trade stays off until you enable a group in Inputs.
+Point `listener.outbox_dir` at the listener `data\outbox` folder. Each signal file is moved to `data\processed` or `data\skipped` after it is handled; a file whose name is already there is treated as a duplicate and discarded. Compile `mt5/GoldChartExecutor.mq5` and attach it to XAUUSD. Trade stays off until you enable a group in Inputs.
 
 This stage classifies and plans orders from the listener. Live MT5 fills follow after the playbooks are confirmed on the chart.

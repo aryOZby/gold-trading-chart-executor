@@ -66,8 +66,6 @@ class CatalogSignal:
     group_name: str
     group_id: int
     group_title: str
-    month: str
-    month_seq: int
     received_at: datetime
     side: Side
     symbol: str
