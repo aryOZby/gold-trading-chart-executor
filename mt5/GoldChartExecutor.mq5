@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.30"
+#property version   "3.31"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -307,8 +307,15 @@ bool SelectPositionById(const ulong id)
 
 void ClosePosition(const ulong ticket, const string reason)
 {
+   if(!PositionSelectByTicket(ticket))
+   {
+      PrintFormat("Ticket=%I64u already closed by the broker (TP or SL) — nothing to do", ticket);
+      return;
+   }
    if(trade.PositionClose(ticket, InpDeviation))
       PrintFormat("Closed ticket=%I64u (%s)", ticket, reason);
+   else if(trade.ResultRetcode() == TRADE_RETCODE_POSITION_CLOSED)
+      PrintFormat("Ticket=%I64u already closed by the broker (TP or SL) — nothing to do", ticket);
    else
       PrintFormat("Close FAILED ticket=%I64u (%s): %u %s", ticket, reason,
                   trade.ResultRetcode(), trade.ResultRetcodeDescription());
