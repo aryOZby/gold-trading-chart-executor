@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.20"
+#property version   "3.30"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -47,6 +47,7 @@ input int    InpSafetyDelaySec    = 5;    // Seconds before emergency SL/TP
 input int    InpFridayCloseHour   = 23;   // Friday close hour (Israel time)
 input int    InpFridayCloseMinute = 30;   // Friday close minute (Israel time)
 input int    InpMaxSignalAgeSec   = 300;  // Ignore signals older than (seconds)
+input int    InpPendingExpiryHours = 12;  // Delete unfilled pending orders after (hours, 0 = never)
 input int    InpDeviation         = 30;   // Deviation (points)
 input int    InpTimerMs           = 200;  // Timer ms
 
@@ -58,6 +59,7 @@ input int    InpTimerMs           = 200;  // Timer ms
 #define SKIP_DIR   "gt_signals\\skipped\\"
 #define STATE_DIR  "gt_state\\"
 #define COUNT_DIR  "gt_count\\"
+#define UNFILLED_LOG "gt_journal\\unfilled.csv"
 #define STATE_GRACE_SEC 60
 
 CTrade trade;
@@ -73,6 +75,7 @@ ulong    sTickets[][MAX_LEGS];
 
 datetime lastGuardLog = 0;
 datetime lastWeekendLog = 0;
+datetime lastExpireLog = 0;
 
 // ---------------------------------------------------------------- Inputs
 
@@ -230,6 +233,7 @@ int OnInit()
    FolderCreate("gt_signals\\skipped", FILE_COMMON);
    FolderCreate("gt_state", FILE_COMMON);
    FolderCreate("gt_count", FILE_COMMON);
+   FolderCreate("gt_journal", FILE_COMMON);
    LoadStates();
    if(!EventSetMillisecondTimer(InpTimerMs))
       EventSetTimer(1);
@@ -253,6 +257,7 @@ void OnTick()
 void OnTimer()
 {
    WeekendClose();
+   ExpirePending();
    ProcessSignals();
    ManageBreakeven();
    SafetyGuard();
@@ -971,9 +976,8 @@ void ApplyBreakeven(const int i)
       ulong id = sTickets[i][k];
       if(OrderSelect(id))
       {
-         // Target already reached before this limit filled: drop it.
-         if(trade.OrderDelete(id))
-            PrintFormat("Breakeven %s: deleted unfilled order %I64u", sKey[i], id);
+         // Target already reached before this order filled: drop it.
+         DeleteUnfilled(id, "breakeven");
          continue;
       }
       if(!SelectPositionById(id))
@@ -1006,7 +1010,7 @@ void ManageBreakeven()
          // Retry deleting any limit that could not be removed on the first pass.
          for(int k = 0; k < sCount[i]; k++)
             if(OrderSelect(sTickets[i][k]))
-               trade.OrderDelete(sTickets[i][k]);
+               DeleteUnfilled(sTickets[i][k], "breakeven");
          continue;
       }
       if(!TriggerTouched(i))
@@ -1057,6 +1061,76 @@ void SafetyGuard()
    }
 }
 
+// ---------------------------------------------------------------- Unfilled pending orders
+
+void JournalUnfilled(const string line)
+{
+   int h = FileOpen(UNFILLED_LOG, FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ);
+   if(h == INVALID_HANDLE)
+   {
+      PrintFormat("Could not write %s: error %d", UNFILLED_LOG, GetLastError());
+      return;
+   }
+   if(FileSize(h) == 0)
+      FileWriteString(h, "deleted_israel,placed_israel,age_hours,comment,group,ticket,type,entry,sl,tp,lot,reason\n");
+   FileSeek(h, 0, SEEK_END);
+   FileWriteString(h, line + "\n");
+   FileClose(h);
+}
+
+// Deletes one of our unfilled pending orders and records it as a trade that was not executed.
+bool DeleteUnfilled(const ulong ticket, const string reason)
+{
+   if(!OrderSelect(ticket))
+      return false;
+   long magic = OrderGetInteger(ORDER_MAGIC);
+   long age = (long)TimeCurrent() - (long)OrderGetInteger(ORDER_TIME_SETUP);
+   string comment = OrderGetString(ORDER_COMMENT);
+   string type = EnumToString((ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE));
+   StringReplace(type, "ORDER_TYPE_", "");
+   double price = OrderGetDouble(ORDER_PRICE_OPEN);
+   double sl = OrderGetDouble(ORDER_SL);
+   double tp = OrderGetDouble(ORDER_TP);
+   double lot = OrderGetDouble(ORDER_VOLUME_CURRENT);
+   if(!trade.OrderDelete(ticket))
+   {
+      if(TimeCurrent() - lastExpireLog >= 60)
+      {
+         lastExpireLog = TimeCurrent();
+         PrintFormat("Unfilled order %I64u [%s] could not be deleted (%s): %u %s — retrying", ticket,
+                     comment, reason, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+      }
+      return false;
+   }
+   datetime deleted = IsraelNow();
+   datetime placed = (datetime)((long)deleted - age);
+   PrintFormat("Not executed (%s): deleted %s %I64u [%s] at %.2f after %.1f hours",
+               reason, type, ticket, comment, price, age / 3600.0);
+   JournalUnfilled(StringFormat("%s,%s,%.1f,%s,G%d,%I64u,%s,%.2f,%.2f,%.2f,%.2f,%s",
+                                TimeToString(deleted, TIME_DATE|TIME_SECONDS),
+                                TimeToString(placed, TIME_DATE|TIME_SECONDS),
+                                age / 3600.0, comment, (int)(magic - MAGIC_BASE), ticket, type,
+                                price, sl, tp, lot, reason));
+   return true;
+}
+
+// A pending order that has not filled within InpPendingExpiryHours is a trade that never happened.
+void ExpirePending()
+{
+   if(InpPendingExpiryHours <= 0)
+      return;
+   long limit = (long)InpPendingExpiryHours * 3600;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0 || !IsOurMagic(OrderGetInteger(ORDER_MAGIC)))
+         continue;
+      if((long)TimeCurrent() - (long)OrderGetInteger(ORDER_TIME_SETUP) < limit)
+         continue;
+      DeleteUnfilled(ticket, "expired");
+   }
+}
+
 // ---------------------------------------------------------------- Friday close
 
 void WeekendClose()
@@ -1077,7 +1151,7 @@ void WeekendClose()
       ulong ticket = OrderGetTicket(i);
       if(ticket == 0 || !IsOurMagic(OrderGetInteger(ORDER_MAGIC)))
          continue;
-      if(trade.OrderDelete(ticket))
+      if(DeleteUnfilled(ticket, "friday_close"))
          closed++;
    }
    if(closed > 0 || TimeCurrent() - lastWeekendLog >= 600)

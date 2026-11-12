@@ -61,6 +61,7 @@ They only touch positions and orders with this EA's magics.
 | Missing SL/TP | A position without SL or TP for more than 5 seconds gets SL and TP 50 pips (5.00 on XAUUSD) from its open price. If price is already beyond that stop, the position is closed. |
 | Friday close | From Friday 23:30 Israel time until Monday 00:00 Israel, all positions are closed, pending orders deleted, and new signals are refused. Israel summer/winter time is calculated in the EA. |
 | Stale signals | Signals older than 5 minutes are not opened. |
+| Unfilled orders | A pending order still waiting after 12 hours is deleted. Every deleted pending order — expired, removed at breakeven, or removed at the Friday close — is recorded as not executed in `Common\Files\gt_journal\unfilled.csv` with its comment, prices, lot, and reason. |
 | Dry run | Signals are logged in the Experts tab and no orders are sent. The guard and Friday close still run. |
 
 Distances, times, and the age limit are EA Inputs.
