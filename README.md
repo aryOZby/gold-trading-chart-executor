@@ -34,11 +34,11 @@ The listener writes each signal to MT5 `Common\Files\gt_signals\<chat_id>_<messa
 |---|---|---|---|---|
 | 1 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 | 2 | Limit at first header price | One per TP row | Every TP row | After the first TP |
-| 3 | Limit at first header price | 2 | Two farthest TPs | After the 2nd TP from the end |
+| 3 | Always pending at first header price | 2 | Two farthest TPs | After the 2nd TP from the end |
 | 4 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 | 5 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 
-All legs share the signal SL. A limit leg becomes a market order when price is already at or past the entry.
+All legs share the signal SL. In strategy 2 a limit leg becomes a market order when price is already at or past the entry. Strategy 3 never does: it places a limit when price still has to come to the entry, and a stop order at the entry when price is already better, so every leg opens at the signal price. Only when price is within the broker's minimum stop distance of the entry does it open at market.
 
 ## Chart slots
 

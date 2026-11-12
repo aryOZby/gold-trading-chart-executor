@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.11"
+#property version   "3.20"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -531,7 +531,8 @@ void SaveTradeNumber(const int slot, const int number)
 
 // ---------------------------------------------------------------- Strategies 1-5
 
-// entry: 0 market, 1 limit at the first header price.
+// entry: 0 market, 1 limit at the first header price (market when price is already past it),
+//        2 always a pending order at the first header price.
 // take: 0 every TP row, 1 last <count> rows, 2 <count> rows farthest from the zone middle.
 // be: 0 first TP row, 1 the <beIdx>-th TP row from the end. All legs share the signal SL.
 bool GetStrategy(const int id, int &entry, int &take, int &count, int &be, int &beIdx)
@@ -540,7 +541,7 @@ bool GetStrategy(const int id, int &entry, int &take, int &count, int &be, int &
    {
       case 1: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // #XAUUSD SELL 4315-4318
       case 2: entry = 1; take = 0; count = 0; be = 0; beIdx = 1; return true; // XAUUSD SELL PLAN @4365_4368
-      case 3: entry = 1; take = 2; count = 2; be = 1; beIdx = 2; return true; // XAUUSD SELL 4083 / MORE SELL
+      case 3: entry = 2; take = 2; count = 2; be = 1; beIdx = 2; return true; // XAUUSD SELL 4083 / MORE SELL
       case 4: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // GOLD SELL 4146/4150
       case 5: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // double #XAUUSD header
    }
@@ -838,7 +839,7 @@ void HandleSignal(const string name)
    int rows[];
    int beRow = PlanLegs(tps, isBuy, (zoneLow + zoneHigh) / 2.0, sTake, sCountN, sBeMode, sBeIdx, rows);
    double trigger = tps[beRow - 1];
-   string entryType = (sEntry == 1) ? "limit" : "market";
+   string entryType = (sEntry == 2) ? "pending" : (sEntry == 1) ? "limit" : "market";
    double volume = NormalizeVolume(_Symbol, SlotLot(slot));
 
    int number = LastTradeNumber(slot) + 1;
@@ -879,8 +880,8 @@ void HandleSignal(const string name)
                comment, key, sCount[st], ArraySize(rows), volume, trigger);
 }
 
-// Limit when the price has not reached entry yet; otherwise the market is already at or
-// better than entry, so a market order fills where the limit would.
+// "limit": a limit when price has not reached entry yet, otherwise market, since the market is
+// already at or better than entry.
 ulong OpenLeg(const bool isBuy, const string entryType, const double volume,
               const double entry, const double sl, const double tp, const string comment)
 {
@@ -890,10 +891,23 @@ ulong OpenLeg(const bool isBuy, const string entryType, const double volume,
    double tpN = NormalizeDouble(tp, _Digits);
    double entryN = NormalizeDouble(entry, _Digits);
    bool ok;
+   double minDist = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+   double now = isBuy ? ask : bid;
+   // "pending" always waits at the signal price: limit from the losing side, stop from the
+   // better side. Only a price already within the broker's minimum distance fills at market.
+   bool pending = (entryType == "pending" && MathAbs(now - entryN) > MathMax(minDist, _Point / 2));
    if(entryType == "limit" && isBuy && ask > entryN)
       ok = trade.BuyLimit(volume, entryN, _Symbol, slN, tpN, ORDER_TIME_GTC, 0, comment);
    else if(entryType == "limit" && !isBuy && bid < entryN)
       ok = trade.SellLimit(volume, entryN, _Symbol, slN, tpN, ORDER_TIME_GTC, 0, comment);
+   else if(pending && isBuy && ask > entryN)
+      ok = trade.BuyLimit(volume, entryN, _Symbol, slN, tpN, ORDER_TIME_GTC, 0, comment);
+   else if(pending && isBuy)
+      ok = trade.BuyStop(volume, entryN, _Symbol, slN, tpN, ORDER_TIME_GTC, 0, comment);
+   else if(pending && bid < entryN)
+      ok = trade.SellLimit(volume, entryN, _Symbol, slN, tpN, ORDER_TIME_GTC, 0, comment);
+   else if(pending)
+      ok = trade.SellStop(volume, entryN, _Symbol, slN, tpN, ORDER_TIME_GTC, 0, comment);
    else if(isBuy)
       ok = trade.Buy(volume, _Symbol, 0.0, slN, tpN, comment);
    else
