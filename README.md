@@ -6,7 +6,7 @@ Execution service for the gold-trading desk: one MT5 Expert Advisor, no extra pr
 |---|---|
 | [Telegram Group Listener](https://github.com/aryOZby/gold-signal-listener) | Listen to groups by chat id and hand off each recognized signal |
 | **Chart Executor** (this repo) | Read those signals on the MT5 chart and trade them |
-| Reporting (planned) | Build monthly Excel tables per group and email them |
+| [Monthly Reports](https://github.com/aryOZby/gold-trading-reports) | Build monthly Excel tables per group and email them |
 
 The EA sits on a gold chart (`XAUUSD`, `XAUUSD.s`, …) and trades the chart symbol. Its Inputs are the operator controls for each group:
 
@@ -50,6 +50,16 @@ All legs share the signal SL. In strategy 2 a limit leg becomes a market order w
 | 4 | GOLD SNIPER | -1001754381715 | 270104 |
 | 5 | Trade With Samder | -1002366136201 | 270105 |
 | 6 | GOLD BULLET SIGNALS | -1003186082440 | 270106 |
+
+## Trade journal
+
+For the reporting service the EA keeps three CSV files in `Common\Files\gt_journal\`, all times in Israel time:
+
+| File | Content |
+|---|---|
+| `closed.csv` | One row per closing deal: comment, group, side, lot, placed / opened / closed time, open and close price, initial SL/TP, SL at close, profit, commission, swap, broker close reason. Rebuilt from the broker history every minute (40-day look-back), so closes that happened while MT5 was down are added later. |
+| `open.csv` | Snapshot of running positions and pending orders, rewritten every minute. |
+| `unfilled.csv` | Pending orders deleted without filling, with the reason. |
 
 ## Protections
 

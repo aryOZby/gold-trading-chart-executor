@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.40"
+#property version   "3.50"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -60,6 +60,10 @@ input int    InpTimerMs           = 200;  // Timer ms
 #define STATE_DIR  "gt_state\\"
 #define COUNT_DIR  "gt_count\\"
 #define UNFILLED_LOG "gt_journal\\unfilled.csv"
+#define CLOSED_LOG   "gt_journal\\closed.csv"
+#define OPEN_LOG     "gt_journal\\open.csv"
+#define JOURNAL_LOOKBACK_DAYS 40
+#define JOURNAL_EVERY_SEC 60
 #define STATE_GRACE_SEC 60
 
 CTrade trade;
@@ -79,6 +83,8 @@ ulong    sTickets[][MAX_LEGS];
 datetime lastGuardLog = 0;
 datetime lastWeekendLog = 0;
 datetime lastExpireLog = 0;
+datetime lastJournalSync = 0;
+long     jDeals[];   // closing deals already in closed.csv, sorted
 
 // ---------------------------------------------------------------- Inputs
 
@@ -239,6 +245,8 @@ int OnInit()
    FolderCreate("gt_journal", FILE_COMMON);
    LoadStates();
    CancelPendingAtFirstTp(true);
+   LoadJournaledDeals();
+   SyncJournal();
    if(!EventSetMillisecondTimer(InpTimerMs))
       EventSetTimer(1);
    PrintFormat("GoldChartExecutor started: symbol=%s mode=%s tracked=%d",
@@ -268,6 +276,8 @@ void OnTimer()
    ManageBreakeven();
    SafetyGuard();
    CleanupStates();
+   if(TimeCurrent() - lastJournalSync >= JOURNAL_EVERY_SEC)
+      SyncJournal();
    ShowStatus();
 }
 
@@ -1188,21 +1198,248 @@ void SafetyGuard()
    }
 }
 
+// ---------------------------------------------------------------- Trade journal
+
+// The reporting service reads three CSV files from Common\Files\gt_journal, all in Israel time:
+// closed.csv (one row per closing deal), open.csv (snapshot of what is running now), and
+// unfilled.csv (pending orders deleted without filling). closed.csv is rebuilt from the
+// broker's history, so closes that happened while MT5 was down are added on the next sync.
+
+void AppendCsv(const string path, const string header, const string line)
+{
+   int h = FileOpen(path, FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ);
+   if(h == INVALID_HANDLE)
+   {
+      PrintFormat("Could not write %s: error %d", path, GetLastError());
+      return;
+   }
+   if(FileSize(h) == 0)
+      FileWriteString(h, header + "\n");
+   FileSeek(h, 0, SEEK_END);
+   FileWriteString(h, line + "\n");
+   FileClose(h);
+}
+
+long ServerOffsetSec()
+{
+   long diff = (long)TimeTradeServer() - (long)TimeGMT();
+   return (long)MathRound(diff / 900.0) * 900;
+}
+
+datetime ServerToIsrael(const datetime server)
+{
+   datetime gmt = (datetime)((long)server - ServerOffsetSec());
+   return gmt + IsraelOffsetHours(gmt) * 3600;
+}
+
+string IsraelText(const datetime server)
+{
+   if(server <= 0)
+      return "";
+   return TimeToString(ServerToIsrael(server), TIME_DATE|TIME_SECONDS);
+}
+
+string CsvSafe(string text)
+{
+   StringReplace(text, ",", " ");
+   StringReplace(text, "\n", " ");
+   StringReplace(text, "\r", " ");
+   return text;
+}
+
+string DealReasonText(const long reason)
+{
+   switch((int)reason)
+   {
+      case DEAL_REASON_TP:     return "TP";
+      case DEAL_REASON_SL:     return "SL";
+      case DEAL_REASON_EXPERT: return "EXPERT";
+      case DEAL_REASON_CLIENT: return "CLIENT";
+      case DEAL_REASON_MOBILE: return "MOBILE";
+      case DEAL_REASON_WEB:    return "WEB";
+      case DEAL_REASON_SO:     return "SO";
+   }
+   return "OTHER";
+}
+
+void LoadJournaledDeals()
+{
+   ArrayResize(jDeals, 0);
+   string lines[];
+   if(!ReadLines(CLOSED_LOG, lines))
+      return;
+   for(int i = 1; i < ArraySize(lines); i++)
+   {
+      int comma = StringFind(lines[i], ",");
+      if(comma <= 0)
+         continue;
+      long deal = StringToInteger(StringSubstr(lines[i], 0, comma));
+      if(deal <= 0)
+         continue;
+      int n = ArraySize(jDeals);
+      ArrayResize(jDeals, n + 1);
+      jDeals[n] = deal;
+   }
+   ArraySort(jDeals);
+}
+
+bool Journaled(const long deal)
+{
+   int n = ArraySize(jDeals);
+   if(n == 0)
+      return false;
+   int idx = ArrayBsearch(jDeals, deal);
+   return idx >= 0 && idx < n && jDeals[idx] == deal;
+}
+
+// Writes one closing deal of one of our positions. Returns false when it is not ours.
+bool JournalClosedDeal(const ulong deal, const ulong position)
+{
+   if(!HistorySelectByPosition(position))
+      return false;
+   ulong in = 0;
+   for(int d = 0; d < HistoryDealsTotal(); d++)
+   {
+      ulong t = HistoryDealGetTicket(d);
+      if(t != 0 && HistoryDealGetInteger(t, DEAL_ENTRY) == DEAL_ENTRY_IN)
+      {
+         in = t;
+         break;
+      }
+   }
+   if(in == 0)
+      return false;
+   long magic = HistoryDealGetInteger(in, DEAL_MAGIC);
+   if(!IsOurMagic(magic))
+      return false;
+   datetime placed = 0;
+   for(int o = 0; o < HistoryOrdersTotal(); o++)
+   {
+      ulong t = HistoryOrderGetTicket(o);
+      if(t == position)
+      {
+         placed = (datetime)HistoryOrderGetInteger(t, ORDER_TIME_SETUP);
+         break;
+      }
+   }
+   datetime opened = (datetime)HistoryDealGetInteger(in, DEAL_TIME);
+   if(placed == 0)
+      placed = opened;
+   double inVolume = HistoryDealGetDouble(in, DEAL_VOLUME);
+   double outVolume = HistoryDealGetDouble(deal, DEAL_VOLUME);
+   double share = inVolume > 0.0 ? outVolume / inVolume : 1.0;
+   double commission = HistoryDealGetDouble(deal, DEAL_COMMISSION) +
+                       HistoryDealGetDouble(in, DEAL_COMMISSION) * share;
+   double fee = HistoryDealGetDouble(deal, DEAL_FEE) + HistoryDealGetDouble(in, DEAL_FEE) * share;
+   string side = (HistoryDealGetInteger(in, DEAL_TYPE) == DEAL_TYPE_BUY) ? "BUY" : "SELL";
+   string line = StringFormat("%I64u,%I64u,%s,G%d,%s,%.2f,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s",
+      deal, position, CsvSafe(HistoryDealGetString(in, DEAL_COMMENT)), (int)(magic - MAGIC_BASE), side,
+      outVolume, IsraelText(placed), IsraelText(opened),
+      IsraelText((datetime)HistoryDealGetInteger(deal, DEAL_TIME)),
+      HistoryDealGetDouble(in, DEAL_PRICE), HistoryDealGetDouble(deal, DEAL_PRICE),
+      HistoryDealGetDouble(in, DEAL_SL), HistoryDealGetDouble(in, DEAL_TP),
+      HistoryDealGetDouble(deal, DEAL_SL), HistoryDealGetDouble(deal, DEAL_PROFIT),
+      commission + fee, HistoryDealGetDouble(deal, DEAL_SWAP),
+      DealReasonText(HistoryDealGetInteger(deal, DEAL_REASON)));
+   AppendCsv(CLOSED_LOG,
+             "deal,position,comment,group,side,lot,placed_israel,opened_israel,closed_israel," +
+             "open_price,close_price,initial_sl,initial_tp,sl_at_close,profit,commission,swap,reason",
+             line);
+   return true;
+}
+
+void SyncClosedDeals()
+{
+   datetime now = TimeTradeServer();
+   if(!HistorySelect(now - JOURNAL_LOOKBACK_DAYS * 86400, now + 86400))
+      return;
+   ulong deals[];
+   ulong positions[];
+   for(int d = 0; d < HistoryDealsTotal(); d++)
+   {
+      ulong t = HistoryDealGetTicket(d);
+      if(t == 0)
+         continue;
+      long entry = HistoryDealGetInteger(t, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY)
+         continue;
+      if(Journaled((long)t))
+         continue;
+      int n = ArraySize(deals);
+      ArrayResize(deals, n + 1);
+      ArrayResize(positions, n + 1);
+      deals[n] = t;
+      positions[n] = (ulong)HistoryDealGetInteger(t, DEAL_POSITION_ID);
+   }
+   int added = 0;
+   for(int i = 0; i < ArraySize(deals); i++)
+   {
+      JournalClosedDeal(deals[i], positions[i]);
+      // Remembered even when not ours, so other bots' deals are not re-read every minute.
+      int n = ArraySize(jDeals);
+      ArrayResize(jDeals, n + 1);
+      jDeals[n] = (long)deals[i];
+      added++;
+   }
+   if(added > 0)
+      ArraySort(jDeals);
+}
+
+void WriteOpenSnapshot()
+{
+   string body = "kind,ticket,comment,group,side,lot,placed_israel,opened_israel,open_price,sl,tp,profit\n";
+   for(int i = 0; i < PositionsTotal(); i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)
+         continue;
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      if(!IsOurMagic(magic))
+         continue;
+      ulong id = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+      datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
+      datetime placed = opened;
+      if(HistoryOrderSelect(id))
+         placed = (datetime)HistoryOrderGetInteger(id, ORDER_TIME_SETUP);
+      body += StringFormat("position,%I64u,%s,G%d,%s,%.2f,%s,%s,%.2f,%.2f,%.2f,%.2f\n",
+         id, CsvSafe(PositionGetString(POSITION_COMMENT)), (int)(magic - MAGIC_BASE),
+         (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "BUY" : "SELL"),
+         PositionGetDouble(POSITION_VOLUME), IsraelText(placed), IsraelText(opened),
+         PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_SL),
+         PositionGetDouble(POSITION_TP), PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP));
+   }
+   for(int i = 0; i < OrdersTotal(); i++)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0)
+         continue;
+      long magic = OrderGetInteger(ORDER_MAGIC);
+      if(!IsOurMagic(magic))
+         continue;
+      long type = OrderGetInteger(ORDER_TYPE);
+      bool isBuy = (type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_BUY_STOP || type == ORDER_TYPE_BUY_STOP_LIMIT);
+      body += StringFormat("order,%I64u,%s,G%d,%s,%.2f,%s,,%.2f,%.2f,%.2f,0\n",
+         ticket, CsvSafe(OrderGetString(ORDER_COMMENT)), (int)(magic - MAGIC_BASE), (isBuy ? "BUY" : "SELL"),
+         OrderGetDouble(ORDER_VOLUME_CURRENT), IsraelText((datetime)OrderGetInteger(ORDER_TIME_SETUP)),
+         OrderGetDouble(ORDER_PRICE_OPEN), OrderGetDouble(ORDER_SL), OrderGetDouble(ORDER_TP));
+   }
+   WriteTextFile("gt_journal\\open.tmp", body, true);
+   FileMove("gt_journal\\open.tmp", FILE_COMMON, OPEN_LOG, FILE_COMMON|FILE_REWRITE);
+}
+
+void SyncJournal()
+{
+   lastJournalSync = TimeCurrent();
+   SyncClosedDeals();
+   WriteOpenSnapshot();
+}
+
 // ---------------------------------------------------------------- Unfilled pending orders
 
 void JournalUnfilled(const string line)
 {
-   int h = FileOpen(UNFILLED_LOG, FILE_READ|FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ);
-   if(h == INVALID_HANDLE)
-   {
-      PrintFormat("Could not write %s: error %d", UNFILLED_LOG, GetLastError());
-      return;
-   }
-   if(FileSize(h) == 0)
-      FileWriteString(h, "deleted_israel,placed_israel,age_hours,comment,group,ticket,type,entry,sl,tp,lot,reason\n");
-   FileSeek(h, 0, SEEK_END);
-   FileWriteString(h, line + "\n");
-   FileClose(h);
+   AppendCsv(UNFILLED_LOG,
+             "deleted_israel,placed_israel,age_hours,comment,group,ticket,type,entry,sl,tp,lot,reason", line);
 }
 
 // Deletes one of our unfilled pending orders and records it as a trade that was not executed.
@@ -1211,7 +1448,8 @@ bool DeleteUnfilled(const ulong ticket, const string reason)
    if(!OrderSelect(ticket))
       return false;
    long magic = OrderGetInteger(ORDER_MAGIC);
-   long age = (long)TimeCurrent() - (long)OrderGetInteger(ORDER_TIME_SETUP);
+   datetime setup = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
+   long age = (long)TimeTradeServer() - (long)setup;
    string comment = OrderGetString(ORDER_COMMENT);
    string type = EnumToString((ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE));
    StringReplace(type, "ORDER_TYPE_", "");
@@ -1229,13 +1467,11 @@ bool DeleteUnfilled(const ulong ticket, const string reason)
       }
       return false;
    }
-   datetime deleted = IsraelNow();
-   datetime placed = (datetime)((long)deleted - age);
    PrintFormat("Not executed (%s): deleted %s %I64u [%s] at %.2f after %.1f hours",
                reason, type, ticket, comment, price, age / 3600.0);
    JournalUnfilled(StringFormat("%s,%s,%.1f,%s,G%d,%I64u,%s,%.2f,%.2f,%.2f,%.2f,%s",
-                                TimeToString(deleted, TIME_DATE|TIME_SECONDS),
-                                TimeToString(placed, TIME_DATE|TIME_SECONDS),
+                                TimeToString(IsraelNow(), TIME_DATE|TIME_SECONDS),
+                                IsraelText(setup),
                                 age / 3600.0, comment, (int)(magic - MAGIC_BASE), ticket, type,
                                 price, sl, tp, lot, reason));
    return true;
