@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.00"
+#property version   "3.10"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -8,31 +8,37 @@ input bool   InpTrade1 = false; // Trade VIP SIGNALS ROOM
 input double InpLot1   = 0.01;  // Lot VIP SIGNALS ROOM
 input int    InpStrat1 = 1;     // Strategy VIP SIGNALS ROOM (1-5)
 input long   InpChat1  = -1002001216034; // Chat id VIP SIGNALS ROOM
+input int    InpMax1   = 0;     // Max open trades VIP SIGNALS ROOM (0 = unlimited)
 
 input bool   InpTrade2 = false; // Trade Technical Pips
 input double InpLot2   = 0.01;  // Lot Technical Pips
 input int    InpStrat2 = 1;     // Strategy Technical Pips (1-5)
 input long   InpChat2  = -1001569906975; // Chat id Technical Pips
+input int    InpMax2   = 0;     // Max open trades Technical Pips (0 = unlimited)
 
 input bool   InpTrade3 = false; // Trade profit__kings
 input double InpLot3   = 0.01;  // Lot profit__kings
 input int    InpStrat3 = 2;     // Strategy profit__kings (1-5)
 input long   InpChat3  = -1002984909577; // Chat id profit__kings
+input int    InpMax3   = 0;     // Max open trades profit__kings (0 = unlimited)
 
 input bool   InpTrade4 = false; // Trade GOLD SNIPER
 input double InpLot4   = 0.01;  // Lot GOLD SNIPER
 input int    InpStrat4 = 3;     // Strategy GOLD SNIPER (1-5)
 input long   InpChat4  = -1001754381715; // Chat id GOLD SNIPER
+input int    InpMax4   = 0;     // Max open trades GOLD SNIPER (0 = unlimited)
 
 input bool   InpTrade5 = false; // Trade Trade With Samder
 input double InpLot5   = 0.01;  // Lot Trade With Samder
 input int    InpStrat5 = 1;     // Strategy Trade With Samder (1-5)
 input long   InpChat5  = -1002366136201; // Chat id Trade With Samder
+input int    InpMax5   = 0;     // Max open trades Trade With Samder (0 = unlimited)
 
 input bool   InpTrade6 = false; // Trade GOLD BULLET SIGNALS
 input double InpLot6   = 0.01;  // Lot GOLD BULLET SIGNALS
 input int    InpStrat6 = 1;     // Strategy GOLD BULLET SIGNALS (1-5)
 input long   InpChat6  = -1003186082440; // Chat id GOLD BULLET SIGNALS
+input int    InpMax6   = 0;     // Max open trades GOLD BULLET SIGNALS (0 = unlimited)
 
 input bool   InpDryRun            = true; // Dry run (log only, no orders)
 input double InpPipSize           = 0.1;  // Pip size (XAUUSD = 0.1)
@@ -51,6 +57,7 @@ input int    InpTimerMs           = 200;  // Timer ms
 #define DONE_DIR   "gt_signals\\done\\"
 #define SKIP_DIR   "gt_signals\\skipped\\"
 #define STATE_DIR  "gt_state\\"
+#define COUNT_DIR  "gt_count\\"
 #define STATE_GRACE_SEC 60
 
 CTrade trade;
@@ -121,6 +128,20 @@ long SlotChat(const int slot)
       case 4: return InpChat4;
       case 5: return InpChat5;
       case 6: return InpChat6;
+   }
+   return 0;
+}
+
+int SlotMax(const int slot)
+{
+   switch(slot)
+   {
+      case 1: return InpMax1;
+      case 2: return InpMax2;
+      case 3: return InpMax3;
+      case 4: return InpMax4;
+      case 5: return InpMax5;
+      case 6: return InpMax6;
    }
    return 0;
 }
@@ -208,6 +229,7 @@ int OnInit()
    FolderCreate("gt_signals\\done", FILE_COMMON);
    FolderCreate("gt_signals\\skipped", FILE_COMMON);
    FolderCreate("gt_state", FILE_COMMON);
+   FolderCreate("gt_count", FILE_COMMON);
    LoadStates();
    if(!EventSetMillisecondTimer(InpTimerMs))
       EventSetTimer(1);
@@ -449,24 +471,62 @@ void LoadStates()
    }
 }
 
+bool StateAlive(const int i)
+{
+   for(int k = 0; k < sCount[i]; k++)
+   {
+      ulong id = sTickets[i][k];
+      if(OrderSelect(id) || SelectPositionById(id))
+         return true;
+   }
+   return false;
+}
+
 void CleanupStates()
 {
    for(int i = ArraySize(sKey) - 1; i >= 0; i--)
    {
       if(TimeCurrent() - sCreated[i] < STATE_GRACE_SEC)
          continue;
-      bool alive = false;
-      for(int k = 0; k < sCount[i] && !alive; k++)
-      {
-         ulong id = sTickets[i][k];
-         if(OrderSelect(id) || SelectPositionById(id))
-            alive = true;
-      }
-      if(alive)
+      if(StateAlive(i))
          continue;
       FileDelete(STATE_DIR + sKey[i] + ".txt", FILE_COMMON);
       RemoveState(i);
    }
+}
+
+// A trade is one signal: it counts while any of its positions or pending orders is open.
+int OpenTrades(const int slot)
+{
+   string prefix = IntegerToString(slot) + "-";
+   int n = 0;
+   for(int i = 0; i < ArraySize(sKey); i++)
+      if(StringFind(sKey[i], prefix) == 0 && StateAlive(i))
+         n++;
+   return n;
+}
+
+// ---------------------------------------------------------------- Monthly trade number
+
+// Per group, per Israel calendar month: the first trade of the month is N1.
+string CounterFile(const int slot)
+{
+   MqlDateTime t;
+   TimeToStruct(IsraelNow(), t);
+   return COUNT_DIR + StringFormat("G%d_%04d%02d.txt", slot, t.year, t.mon);
+}
+
+int LastTradeNumber(const int slot)
+{
+   string lines[];
+   if(!ReadLines(CounterFile(slot), lines) || ArraySize(lines) == 0)
+      return 0;
+   return (int)StringToInteger(lines[0]);
+}
+
+void SaveTradeNumber(const int slot, const int number)
+{
+   WriteTextFile(CounterFile(slot), IntegerToString(number) + "\n", true);
 }
 
 // ---------------------------------------------------------------- Strategies 1-5
@@ -753,6 +813,16 @@ void HandleSignal(const string name)
       Skip(name, "already opened");
       return;
    }
+   int maxOpen = SlotMax(slot);
+   if(maxOpen > 0)
+   {
+      int running = OpenTrades(slot);
+      if(running >= maxOpen)
+      {
+         Skip(name, StringFormat("%s already has %d open trades (max %d)", who, running, maxOpen));
+         return;
+      }
+   }
    if((isBuy && sl >= entry) || (!isBuy && sl <= entry))
    {
       Skip(name, StringFormat("SL %.2f is on the wrong side of entry %.2f", sl, entry));
@@ -771,11 +841,14 @@ void HandleSignal(const string name)
    string entryType = (sEntry == 1) ? "limit" : "market";
    double volume = NormalizeVolume(_Symbol, SlotLot(slot));
 
+   int number = LastTradeNumber(slot) + 1;
+   // Reads left to right as strategy, group, monthly trade number.
+   string comment = StringFormat("S%d G%d N%d", strategy, slot, number);
    string plan = "";
    for(int l = 0; l < ArraySize(rows); l++)
       plan += StringFormat(" TP%d=%.2f", rows[l], tps[rows[l] - 1]);
-   PrintFormat("%s %s from %s: S%d %s %s lot=%.2f entry=%.2f sl=%.2f breakeven-at=%.2f |%s",
-               (InpDryRun ? "DRY RUN" : "Signal"), key, who, strategy, side, entryType,
+   PrintFormat("%s [%s] %s from %s: %s %s lot=%.2f entry=%.2f sl=%.2f breakeven-at=%.2f |%s",
+               (InpDryRun ? "DRY RUN" : "Signal"), comment, key, who, side, entryType,
                volume, entry, sl, trigger, plan);
    if(InpDryRun)
    {
@@ -787,7 +860,6 @@ void HandleSignal(const string name)
    int st = AddState(key, isBuy ? 1 : -1, trigger, false);
    for(int l = 0; l < ArraySize(rows); l++)
    {
-      string comment = "GT" + key + "-TP" + IntegerToString(rows[l]);
       ulong ticket = OpenLeg(isBuy, entryType, volume, entry, sl, tps[rows[l] - 1], comment);
       if(ticket > 0)
          AddTicket(st, ticket);
@@ -796,13 +868,14 @@ void HandleSignal(const string name)
    Archive(name, DONE_DIR);
    if(sCount[st] == 0)
    {
-      PrintFormat("Open FAILED for every leg of %s", key);
+      PrintFormat("Open FAILED for every leg of %s [%s]", key, comment);
       RemoveState(st);
       return;
    }
+   SaveTradeNumber(slot, number);
    SaveState(st);
-   PrintFormat("Opened %s: %d/%d legs, lot=%.2f, breakeven-at=%.2f",
-               key, sCount[st], ArraySize(rows), volume, trigger);
+   PrintFormat("Opened [%s] %s: %d/%d legs, lot=%.2f, breakeven-at=%.2f",
+               comment, key, sCount[st], ArraySize(rows), volume, trigger);
 }
 
 // Limit when the price has not reached entry yet; otherwise the market is already at or
@@ -1020,9 +1093,13 @@ string OnOff(const bool value)
 
 string SlotStatus(const int slot, const string label, const bool on, const double lot, const int strategy)
 {
-   return IntegerToString(slot) + " " + label + "  " + OnOff(on) +
+   int maxOpen = SlotMax(slot);
+   return "G" + IntegerToString(slot) + " " + label + "  " + OnOff(on) +
           "  lot " + DoubleToString(lot, 2) +
-          "  S" + IntegerToString(ClampStrategy(strategy)) + "\n";
+          "  S" + IntegerToString(ClampStrategy(strategy)) +
+          "  open " + IntegerToString(OpenTrades(slot)) + "/" +
+          (maxOpen > 0 ? IntegerToString(maxOpen) : "unlimited") +
+          "  next N" + IntegerToString(LastTradeNumber(slot) + 1) + "\n";
 }
 
 void ShowStatus()

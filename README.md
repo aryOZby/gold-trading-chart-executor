@@ -14,8 +14,15 @@ The EA sits on a gold chart (`XAUUSD`, `XAUUSD.s`, …) and trades the chart sym
 - **Lot** — volume per position
 - **Strategy** — playbook `1`–`5`
 - **Chat id** — the Telegram group feeding that slot
+- **Max open trades** — how many of that group's trades may run at once; `0` means unlimited
 
 Changes apply as soon as you press OK in Inputs.
+
+A trade is one signal opened with one strategy; all of its positions count as that one trade while any of them is still open or pending.
+
+## Order comment
+
+Every position and order of a trade carries the comment `S<strategy> G<group> N<number>`, for example `S1 G2 N14`: strategy 1, slot 2 (Technical Pips), the 14th trade of that group this month. Numbering is per group and restarts at `N1` on the first of each month (Israel time). Counters live in `Common\Files\gt_count\`.
 
 ## Hand-off
 
