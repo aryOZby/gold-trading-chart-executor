@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.10"
+#property version   "3.11"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -842,8 +842,8 @@ void HandleSignal(const string name)
    double volume = NormalizeVolume(_Symbol, SlotLot(slot));
 
    int number = LastTradeNumber(slot) + 1;
-   // Reads left to right as strategy, group, monthly trade number.
-   string comment = StringFormat("S%d G%d N%d", strategy, slot, number);
+   // Reads left to right as strategy, group, monthly trade number; each leg adds its TP row.
+   string comment = StringFormat("S%d|G%d|N%d", strategy, slot, number);
    string plan = "";
    for(int l = 0; l < ArraySize(rows); l++)
       plan += StringFormat(" TP%d=%.2f", rows[l], tps[rows[l] - 1]);
@@ -860,7 +860,8 @@ void HandleSignal(const string name)
    int st = AddState(key, isBuy ? 1 : -1, trigger, false);
    for(int l = 0; l < ArraySize(rows); l++)
    {
-      ulong ticket = OpenLeg(isBuy, entryType, volume, entry, sl, tps[rows[l] - 1], comment);
+      string legComment = comment + "|tp" + IntegerToString(rows[l]);
+      ulong ticket = OpenLeg(isBuy, entryType, volume, entry, sl, tps[rows[l] - 1], legComment);
       if(ticket > 0)
          AddTicket(st, ticket);
    }

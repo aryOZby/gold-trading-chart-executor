@@ -22,7 +22,7 @@ A trade is one signal opened with one strategy; all of its positions count as th
 
 ## Order comment
 
-Every position and order of a trade carries the comment `S<strategy> G<group> N<number>`, for example `S1 G2 N14`: strategy 1, slot 2 (Technical Pips), the 14th trade of that group this month. Numbering is per group and restarts at `N1` on the first of each month (Israel time). Counters live in `Common\Files\gt_count\`.
+Every position and order carries the comment `S<strategy>|G<group>|N<number>|tp<row>`, for example `S1|G2|N14|tp5`: strategy 1, slot 2 (Technical Pips), the 14th trade of that group this month, and the leg aimed at the 5th TP row of the signal. All legs of a trade share S, G, and N. Numbering is per group and restarts at `N1` on the first of each month (Israel time). Counters live in `Common\Files\gt_count\`.
 
 ## Hand-off
 
