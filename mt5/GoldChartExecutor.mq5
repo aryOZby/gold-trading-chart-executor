@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.31"
+#property version   "3.40"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -68,6 +68,9 @@ CTrade trade;
 string   sKey[];
 int      sSide[];
 double   sTrigger[];
+double   sFirstTp[];
+bool     sArmed[];
+datetime sArmedAt[];
 bool     sBe[];
 int      sCount[];
 datetime sCreated[];
@@ -235,6 +238,7 @@ int OnInit()
    FolderCreate("gt_count", FILE_COMMON);
    FolderCreate("gt_journal", FILE_COMMON);
    LoadStates();
+   CancelPendingAtFirstTp(true);
    if(!EventSetMillisecondTimer(InpTimerMs))
       EventSetTimer(1);
    PrintFormat("GoldChartExecutor started: symbol=%s mode=%s tracked=%d",
@@ -251,6 +255,7 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   CancelPendingAtFirstTp(false);
    ManageBreakeven();
 }
 
@@ -259,6 +264,7 @@ void OnTimer()
    WeekendClose();
    ExpirePending();
    ProcessSignals();
+   CancelPendingAtFirstTp(false);
    ManageBreakeven();
    SafetyGuard();
    CleanupStates();
@@ -380,6 +386,9 @@ int AddState(const string key, const int side, const double trigger, const bool 
    ArrayResize(sKey, n + 1);
    ArrayResize(sSide, n + 1);
    ArrayResize(sTrigger, n + 1);
+   ArrayResize(sFirstTp, n + 1);
+   ArrayResize(sArmed, n + 1);
+   ArrayResize(sArmedAt, n + 1);
    ArrayResize(sBe, n + 1);
    ArrayResize(sCount, n + 1);
    ArrayResize(sCreated, n + 1);
@@ -387,6 +396,9 @@ int AddState(const string key, const int side, const double trigger, const bool 
    sKey[n] = key;
    sSide[n] = side;
    sTrigger[n] = trigger;
+   sFirstTp[n] = 0.0;
+   sArmed[n] = false;
+   sArmedAt[n] = 0;
    sBe[n] = be;
    sCount[n] = 0;
    sCreated[n] = TimeCurrent();
@@ -411,6 +423,9 @@ void RemoveState(const int i)
       sKey[j] = sKey[j + 1];
       sSide[j] = sSide[j + 1];
       sTrigger[j] = sTrigger[j + 1];
+      sFirstTp[j] = sFirstTp[j + 1];
+      sArmed[j] = sArmed[j + 1];
+      sArmedAt[j] = sArmedAt[j + 1];
       sBe[j] = sBe[j + 1];
       sCount[j] = sCount[j + 1];
       sCreated[j] = sCreated[j + 1];
@@ -420,6 +435,9 @@ void RemoveState(const int i)
    ArrayResize(sKey, n - 1);
    ArrayResize(sSide, n - 1);
    ArrayResize(sTrigger, n - 1);
+   ArrayResize(sFirstTp, n - 1);
+   ArrayResize(sArmed, n - 1);
+   ArrayResize(sArmedAt, n - 1);
    ArrayResize(sBe, n - 1);
    ArrayResize(sCount, n - 1);
    ArrayResize(sCreated, n - 1);
@@ -431,6 +449,9 @@ void SaveState(const int i)
 {
    string body = "side=" + IntegerToString(sSide[i]) + "\n" +
                  "trigger=" + DoubleToString(sTrigger[i], _Digits) + "\n" +
+                 "first_tp=" + DoubleToString(sFirstTp[i], _Digits) + "\n" +
+                 "armed=" + (sArmed[i] ? "1" : "0") + "\n" +
+                 "armed_at=" + IntegerToString((long)sArmedAt[i]) + "\n" +
                  "be=" + (sBe[i] ? "1" : "0") + "\n";
    for(int k = 0; k < sCount[i]; k++)
       body += "ticket=" + IntegerToString((long)sTickets[i][k]) + "\n";
@@ -474,6 +495,12 @@ void LoadStates()
             trigger = StringToDouble(v);
          else if(k == "be")
             be = (v == "1");
+         else if(k == "first_tp")
+            sFirstTp[i] = StringToDouble(v);
+         else if(k == "armed")
+            sArmed[i] = (v == "1");
+         else if(k == "armed_at")
+            sArmedAt[i] = (datetime)StringToInteger(v);
          else if(k == "ticket")
             AddTicket(i, (ulong)StringToInteger(v));
       }
@@ -871,6 +898,9 @@ void HandleSignal(const string name)
 
    trade.SetExpertMagicNumber(MAGIC_BASE + slot);
    int st = AddState(key, isBuy ? 1 : -1, trigger, false);
+   sFirstTp[st] = tps[0];
+   sArmed[st] = !FirstTpBeyond(isBuy ? 1 : -1, tps[0]);
+   sArmedAt[st] = TimeCurrent();
    for(int l = 0; l < ArraySize(rows); l++)
    {
       string legComment = comment + "|tp" + IntegerToString(rows[l]);
@@ -960,6 +990,14 @@ bool ClosedAtTpBeyond(const ulong id, const int side, const double trigger)
    return false;
 }
 
+bool HasPosition(const int i)
+{
+   for(int k = 0; k < sCount[i]; k++)
+      if(SelectPositionById(sTickets[i][k]))
+         return true;
+   return false;
+}
+
 bool TriggerTouched(const int i)
 {
    if(sTrigger[i] <= 0.0 || sSide[i] == 0)
@@ -1020,12 +1058,94 @@ void ManageBreakeven()
                DeleteUnfilled(sTickets[i][k], "breakeven");
          continue;
       }
-      if(!TriggerTouched(i))
+      // Nothing to protect until a leg has filled; unfilled orders are handled at TP1.
+      if(!HasPosition(i) || !TriggerTouched(i))
          continue;
       PrintFormat("Breakeven trigger %.2f touched for %s", sTrigger[i], sKey[i]);
       ApplyBreakeven(i);
       sBe[i] = true;
       SaveState(i);
+   }
+}
+
+// ---------------------------------------------------------------- First TP before fill
+
+bool HasPending(const int i, datetime &oldest)
+{
+   bool any = false;
+   oldest = 0;
+   for(int k = 0; k < sCount[i]; k++)
+   {
+      if(!OrderSelect(sTickets[i][k]))
+         continue;
+      datetime setup = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
+      if(!any || setup < oldest)
+         oldest = setup;
+      any = true;
+   }
+   return any;
+}
+
+// True when price went as far as the signal's TP1 since `since`, judged from M1 bars.
+bool FirstTpReachedSince(const int i, const datetime since)
+{
+   double values[];
+   if(sSide[i] > 0)
+   {
+      if(CopyHigh(_Symbol, PERIOD_M1, since, TimeCurrent(), values) <= 0)
+         return false;
+      return values[ArrayMaximum(values)] >= sFirstTp[i];
+   }
+   if(CopyLow(_Symbol, PERIOD_M1, since, TimeCurrent(), values) <= 0)
+      return false;
+   return values[ArrayMinimum(values)] <= sFirstTp[i];
+}
+
+bool FirstTpBeyond(const int side, const double firstTp)
+{
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(side > 0)
+      return bid > 0.0 && bid >= firstTp;
+   return ask > 0.0 && ask <= firstTp;
+}
+
+// A signal whose price reaches TP1 while its pending orders are still waiting has run away:
+// every still-waiting order of that signal is deleted and recorded as not executed.
+// A signal posted when price was already past TP1 only counts once price has come back to
+// the entry side of TP1 (armed) and then reaches TP1 again. On start (catchUp) the M1
+// history since arming is checked too, for moves that happened while MT5 was closed.
+void CancelPendingAtFirstTp(const bool catchUp)
+{
+   for(int i = 0; i < ArraySize(sKey); i++)
+   {
+      if(sFirstTp[i] <= 0.0 || sSide[i] == 0)
+         continue;
+      datetime oldest;
+      if(!HasPending(i, oldest))
+         continue;
+      bool beyond = FirstTpBeyond(sSide[i], sFirstTp[i]);
+      if(!sArmed[i])
+      {
+         if(beyond)
+            continue;
+         sArmed[i] = true;
+         sArmedAt[i] = TimeCurrent();
+         SaveState(i);
+         continue;
+      }
+      bool reached = beyond;
+      if(!reached && catchUp)
+         reached = FirstTpReachedSince(i, oldest > sArmedAt[i] ? oldest : sArmedAt[i]);
+      if(!reached)
+         continue;
+      int deleted = 0;
+      for(int k = 0; k < sCount[i]; k++)
+         if(OrderSelect(sTickets[i][k]) && DeleteUnfilled(sTickets[i][k], "tp1_before_fill"))
+            deleted++;
+      if(deleted > 0)
+         PrintFormat("TP1 %.2f reached before %s filled — deleted %d pending orders",
+                     sFirstTp[i], sKey[i], deleted);
    }
 }
 
