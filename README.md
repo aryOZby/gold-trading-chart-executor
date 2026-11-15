@@ -12,7 +12,7 @@ The EA sits on a gold chart (`XAUUSD`, `XAUUSD.s`, …) and trades the chart sym
 
 - **Trade** — on/off for opening positions
 - **Lot** — volume per position
-- **Strategy** — playbook `1`–`5`
+- **Strategy** — playbook `1`–`6`
 - **Chat id** — the Telegram group feeding that slot
 - **Max open trades** — how many of that group's trades may run at once; `0` means unlimited
 
@@ -37,6 +37,7 @@ The listener writes each signal to MT5 `Common\Files\gt_signals\<chat_id>_<messa
 | 3 | Always pending at first header price | 2 | Two farthest TPs | After the 2nd TP from the end |
 | 4 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 | 5 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
+| 6 | Market | 1 | The TP row (last row if there are several) | — (single position) |
 
 All legs share the signal SL. In strategy 2 a limit leg becomes a market order when price is already at or past the entry. Strategy 3 never does: it places a limit when price still has to come to the entry, and a stop order at the entry when price is already better, so every leg opens at the signal price. Only when price is within the broker's minimum stop distance of the entry does it open at market.
 

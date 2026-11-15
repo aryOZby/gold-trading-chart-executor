@@ -1,42 +1,42 @@
 #property copyright "Gold Trading"
-#property version   "3.50"
+#property version   "3.60"
 #property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
 
 input bool   InpTrade1 = false; // Trade VIP SIGNALS ROOM
 input double InpLot1   = 0.01;  // Lot VIP SIGNALS ROOM
-input int    InpStrat1 = 1;     // Strategy VIP SIGNALS ROOM (1-5)
+input int    InpStrat1 = 1;     // Strategy VIP SIGNALS ROOM (1-6)
 input long   InpChat1  = -1002001216034; // Chat id VIP SIGNALS ROOM
 input int    InpMax1   = 0;     // Max open trades VIP SIGNALS ROOM (0 = unlimited)
 
 input bool   InpTrade2 = false; // Trade Technical Pips
 input double InpLot2   = 0.01;  // Lot Technical Pips
-input int    InpStrat2 = 1;     // Strategy Technical Pips (1-5)
+input int    InpStrat2 = 1;     // Strategy Technical Pips (1-6)
 input long   InpChat2  = -1001569906975; // Chat id Technical Pips
 input int    InpMax2   = 0;     // Max open trades Technical Pips (0 = unlimited)
 
 input bool   InpTrade3 = false; // Trade profit__kings
 input double InpLot3   = 0.01;  // Lot profit__kings
-input int    InpStrat3 = 2;     // Strategy profit__kings (1-5)
+input int    InpStrat3 = 2;     // Strategy profit__kings (1-6)
 input long   InpChat3  = -1002984909577; // Chat id profit__kings
 input int    InpMax3   = 0;     // Max open trades profit__kings (0 = unlimited)
 
 input bool   InpTrade4 = false; // Trade GOLD SNIPER
 input double InpLot4   = 0.01;  // Lot GOLD SNIPER
-input int    InpStrat4 = 3;     // Strategy GOLD SNIPER (1-5)
+input int    InpStrat4 = 3;     // Strategy GOLD SNIPER (1-6)
 input long   InpChat4  = -1001754381715; // Chat id GOLD SNIPER
 input int    InpMax4   = 0;     // Max open trades GOLD SNIPER (0 = unlimited)
 
 input bool   InpTrade5 = false; // Trade Trade With Samder
 input double InpLot5   = 0.01;  // Lot Trade With Samder
-input int    InpStrat5 = 1;     // Strategy Trade With Samder (1-5)
+input int    InpStrat5 = 1;     // Strategy Trade With Samder (1-6)
 input long   InpChat5  = -1002366136201; // Chat id Trade With Samder
 input int    InpMax5   = 0;     // Max open trades Trade With Samder (0 = unlimited)
 
 input bool   InpTrade6 = false; // Trade GOLD BULLET SIGNALS
 input double InpLot6   = 0.01;  // Lot GOLD BULLET SIGNALS
-input int    InpStrat6 = 1;     // Strategy GOLD BULLET SIGNALS (1-5)
+input int    InpStrat6 = 1;     // Strategy GOLD BULLET SIGNALS (1-6)
 input long   InpChat6  = -1003186082440; // Chat id GOLD BULLET SIGNALS
 input int    InpMax6   = 0;     // Max open trades GOLD BULLET SIGNALS (0 = unlimited)
 
@@ -170,8 +170,8 @@ int ClampStrategy(const int value)
 {
    if(value < 1)
       return 1;
-   if(value > 5)
-      return 5;
+   if(value > 6)
+      return 6;
    return value;
 }
 
@@ -578,7 +578,7 @@ void SaveTradeNumber(const int slot, const int number)
    WriteTextFile(CounterFile(slot), IntegerToString(number) + "\n", true);
 }
 
-// ---------------------------------------------------------------- Strategies 1-5
+// ---------------------------------------------------------------- Strategies 1-6
 
 // entry: 0 market, 1 limit at the first header price (market when price is already past it),
 //        2 always a pending order at the first header price.
@@ -593,6 +593,7 @@ bool GetStrategy(const int id, int &entry, int &take, int &count, int &be, int &
       case 3: entry = 2; take = 2; count = 2; be = 1; beIdx = 2; return true; // XAUUSD SELL 4083 / MORE SELL
       case 4: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // GOLD SELL 4146/4150
       case 5: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // double #XAUUSD header
+      case 6: entry = 0; take = 1; count = 1; be = 0; beIdx = 1; return true; // XAUUSD Sell : 4070.40 / single TP
    }
    return false;
 }
