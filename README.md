@@ -34,7 +34,7 @@ The listener writes each signal to MT5 `Common\Files\gt_signals\<chat_id>_<messa
 |---|---|---|---|---|
 | 1 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 | 2 | Limit at first header price | One per TP row | Every TP row | After the first TP |
-| 3 | Always pending at first header price | 2 | Two farthest TPs | After the 2nd TP from the end |
+| 3 | Always pending at first header price | One per TP row | Every TP row | After the first TP |
 | 4 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 | 5 | Market | 3 | Last 3 TP rows | After the 3rd TP from the end |
 | 6 | Market | 1 | The TP row (last row if there are several) | — (single position) |

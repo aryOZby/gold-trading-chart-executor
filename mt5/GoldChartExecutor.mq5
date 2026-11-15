@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.70"
+#property version   "3.80"
 #property description "Chart Executor: reads listener signals, strategies 1-6, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -601,7 +601,7 @@ bool GetStrategy(const int id, int &entry, int &take, int &count, int &be, int &
    {
       case 1: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // #XAUUSD SELL 4315-4318
       case 2: entry = 1; take = 0; count = 0; be = 0; beIdx = 1; return true; // XAUUSD SELL PLAN @4365_4368
-      case 3: entry = 2; take = 2; count = 2; be = 1; beIdx = 2; return true; // XAUUSD SELL 4083 / MORE SELL
+      case 3: entry = 2; take = 0; count = 0; be = 0; beIdx = 1; return true; // XAUUSD SELL PLAN @4365_4368, always pending
       case 4: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // GOLD SELL 4146/4150
       case 5: entry = 0; take = 1; count = 3; be = 1; beIdx = 3; return true; // double #XAUUSD header
       case 6: entry = 0; take = 1; count = 1; be = 0; beIdx = 1; return true; // XAUUSD Sell : 4070.40 / single TP
