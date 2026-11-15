@@ -51,6 +51,7 @@ All legs share the signal SL. In strategy 2 a limit leg becomes a market order w
 | 4 | GOLD SNIPER | -1001754381715 | 270104 |
 | 5 | Trade With Samder | -1002366136201 | 270105 |
 | 6 | GOLD BULLET SIGNALS | -1003186082440 | 270106 |
+| 7 | Alphabet Forex | set in Inputs (listener log) | 270107 |
 
 ## Trade journal
 

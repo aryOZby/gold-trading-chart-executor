@@ -1,6 +1,6 @@
 #property copyright "Gold Trading"
-#property version   "3.60"
-#property description "Chart Executor: reads listener signals, strategies 1-5, breakeven, 50-pip guard, Friday close"
+#property version   "3.70"
+#property description "Chart Executor: reads listener signals, strategies 1-6, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
 
@@ -40,6 +40,12 @@ input int    InpStrat6 = 1;     // Strategy GOLD BULLET SIGNALS (1-6)
 input long   InpChat6  = -1003186082440; // Chat id GOLD BULLET SIGNALS
 input int    InpMax6   = 0;     // Max open trades GOLD BULLET SIGNALS (0 = unlimited)
 
+input bool   InpTrade7 = false; // Trade Alphabet Forex
+input double InpLot7   = 0.01;  // Lot Alphabet Forex
+input int    InpStrat7 = 6;     // Strategy Alphabet Forex (1-6)
+input long   InpChat7  = 0;     // Chat id Alphabet Forex (from the listener log)
+input int    InpMax7   = 0;     // Max open trades Alphabet Forex (0 = unlimited)
+
 input bool   InpDryRun            = true; // Dry run (log only, no orders)
 input double InpPipSize           = 0.1;  // Pip size (XAUUSD = 0.1)
 input int    InpSafetyPips        = 50;   // Emergency SL/TP distance (pips)
@@ -52,7 +58,7 @@ input int    InpDeviation         = 30;   // Deviation (points)
 input int    InpTimerMs           = 200;  // Timer ms
 
 #define MAGIC_BASE 270100
-#define SLOTS      6
+#define SLOTS      7
 #define MAX_LEGS   12
 #define SIG_DIR    "gt_signals\\"
 #define DONE_DIR   "gt_signals\\done\\"
@@ -98,6 +104,7 @@ bool SlotTrade(const int slot)
       case 4: return InpTrade4;
       case 5: return InpTrade5;
       case 6: return InpTrade6;
+      case 7: return InpTrade7;
    }
    return false;
 }
@@ -112,6 +119,7 @@ double SlotLot(const int slot)
       case 4: return InpLot4;
       case 5: return InpLot5;
       case 6: return InpLot6;
+      case 7: return InpLot7;
    }
    return 0.0;
 }
@@ -126,6 +134,7 @@ int SlotStrategy(const int slot)
       case 4: return InpStrat4;
       case 5: return InpStrat5;
       case 6: return InpStrat6;
+      case 7: return InpStrat7;
    }
    return 0;
 }
@@ -140,6 +149,7 @@ long SlotChat(const int slot)
       case 4: return InpChat4;
       case 5: return InpChat5;
       case 6: return InpChat6;
+      case 7: return InpChat7;
    }
    return 0;
 }
@@ -154,6 +164,7 @@ int SlotMax(const int slot)
       case 4: return InpMax4;
       case 5: return InpMax5;
       case 6: return InpMax6;
+      case 7: return InpMax7;
    }
    return 0;
 }
@@ -1567,6 +1578,7 @@ void ShowStatus()
       SlotStatus(4, "Sniper", InpTrade4, InpLot4, InpStrat4),
       SlotStatus(5, "Samder", InpTrade5, InpLot5, InpStrat5),
       SlotStatus(6, "Bullet", InpTrade6, InpLot6, InpStrat6),
+      SlotStatus(7, "Alpha ", InpTrade7, InpLot7, InpStrat7),
       "open ", IntegerToString(OurPositions()), "  tracked ", IntegerToString(ArraySize(sKey)),
       "  guard ", IntegerToString(InpSafetyPips), " pips"
    );
