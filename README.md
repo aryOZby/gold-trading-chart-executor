@@ -22,11 +22,13 @@ A trade is one signal opened with one strategy; all of its positions count as th
 
 ## Order comment
 
-Every position and order carries the comment `S<strategy>|G<group>|N<number>|tp<row>`, for example `S1|G2|N14|tp5`: strategy 1, slot 2 (Technical Pips), the 14th trade of that group this month, and the leg aimed at the 5th TP row of the signal. All legs of a trade share S, G, and N. Numbering is per group and restarts at `N1` on the first of each month (Israel time). Counters live in `Common\Files\gt_count\`.
+Every position and order carries the comment `S<strategy>|G<group>|N<number>|tp<row>`, for example `S1|G2|N14|tp5`: strategy 1, slot 2 (Technical Pips), the 14th trade of that group this month, and the leg aimed at the 5th TP row of the signal. All legs of a trade share S, G, and N. Numbering is per group and restarts at `N1` on the first of each month (Israel time). Counters live in `Common\Files\gt_count\<account>\`.
 
 ## Hand-off
 
-The listener writes each signal to MT5 `Common\Files\gt_signals\<chat_id>_<message_id>.json`. The EA picks it up within a fraction of a second and moves it to `gt_signals\done\` (opened, or logged in dry run) or `gt_signals\skipped\` (Trade off, stale, weekend, invalid). A file whose name is already in either folder is a duplicate and is deleted.
+The listener writes each signal to MT5 `Common\Files\gt_signals\<chat_id>_<message_id>.json`. The EA picks it up within a fraction of a second and records what it did under its own account number: a copy in `gt_signals\done\<account>\` (opened, or logged in dry run) or `gt_signals\skipped\<account>\` (Trade off, stale, weekend, invalid). The signal itself stays in `gt_signals\` for a day, so every terminal on the machine — for example a demo and a live account side by side — trades it with its own Inputs. A signal already recorded for this account is never handled twice.
+
+Counters (`gt_count\<account>\`), breakeven tracking (`gt_state\<account>\`), and the journal (`gt_journal\<account>\`) are kept per account as well.
 
 ## Strategies
 
@@ -55,7 +57,7 @@ All legs share the signal SL. In strategy 2 a limit leg becomes a market order w
 
 ## Trade journal
 
-For the reporting service the EA keeps three CSV files in `Common\Files\gt_journal\`, all times in Israel time:
+For the reporting service the EA keeps three CSV files in `Common\Files\gt_journal\<account>\`, all times in Israel time:
 
 | File | Content |
 |---|---|
@@ -70,11 +72,11 @@ They only touch positions and orders with this EA's magics.
 | Protection | Behaviour |
 |---|---|
 | TP1 before fill | If price reaches the signal's TP1 while any of its pending orders is still waiting, every pending order of that signal is deleted and recorded as not executed. A signal posted with price already past TP1 only counts once price has been back on the entry side of TP1. |
-| Breakeven | Once at least one leg has filled, when price touches the strategy's breakeven TP, every open leg of that signal gets SL = its entry price and any unfilled order is deleted. If the broker refuses the stop, the leg is closed. Tracking survives EA restarts (`gt_state\`). |
+| Breakeven | Once at least one leg has filled, when price touches the strategy's breakeven TP, every open leg of that signal gets SL = its entry price and any unfilled order is deleted. If the broker refuses the stop, the leg is closed. Tracking survives EA restarts (`gt_state\<account>\`). |
 | Missing SL/TP | A position without SL or TP for more than 5 seconds gets SL and TP 50 pips (5.00 on XAUUSD) from its open price. If price is already beyond that stop, the position is closed. |
 | Friday close | From Friday 23:30 Israel time until Monday 00:00 Israel, all positions are closed, pending orders deleted, and new signals are refused. Israel summer/winter time is calculated in the EA. |
 | Stale signals | Signals older than 5 minutes are not opened. |
-| Unfilled orders | A pending order still waiting after 12 hours is deleted. Every deleted pending order — expired, TP1 before fill, removed at breakeven, or removed at the Friday close — is recorded as not executed in `Common\Files\gt_journal\unfilled.csv` with its comment, prices, lot, and reason. |
+| Unfilled orders | A pending order still waiting after 12 hours is deleted. Every deleted pending order — expired, TP1 before fill, removed at breakeven, or removed at the Friday close — is recorded as not executed in `Common\Files\gt_journal\<account>\unfilled.csv` with its comment, prices, lot, and reason. |
 | Dry run | Signals are logged in the Experts tab and no orders are sent. The guard and Friday close still run. |
 
 Distances, times, and the age limit are EA Inputs.

@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.80"
+#property version   "3.90"
 #property description "Chart Executor: reads listener signals, strategies 1-6, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -61,18 +61,28 @@ input int    InpTimerMs           = 200;  // Timer ms
 #define SLOTS      7
 #define MAX_LEGS   12
 #define SIG_DIR    "gt_signals\\"
-#define DONE_DIR   "gt_signals\\done\\"
-#define SKIP_DIR   "gt_signals\\skipped\\"
-#define STATE_DIR  "gt_state\\"
-#define COUNT_DIR  "gt_count\\"
-#define UNFILLED_LOG "gt_journal\\unfilled.csv"
-#define CLOSED_LOG   "gt_journal\\closed.csv"
-#define OPEN_LOG     "gt_journal\\open.csv"
+#define LEGACY_STATE_DIR    "gt_state\\"
+#define LEGACY_COUNT_DIR    "gt_count\\"
+#define LEGACY_UNFILLED_LOG "gt_journal\\unfilled.csv"
+#define SIGNAL_KEEP_SEC 86400
 #define JOURNAL_LOOKBACK_DAYS 40
 #define JOURNAL_EVERY_SEC 60
 #define STATE_GRACE_SEC 60
 
 CTrade trade;
+
+// Several terminals (demo and live) can run this EA on one machine and share Common\Files.
+// Every terminal reads every signal; what it did with it, its counters, state, and journal
+// live under its own account number.
+string ACCOUNT;
+string DONE_DIR;
+string SKIP_DIR;
+string STATE_DIR;
+string COUNT_DIR;
+string JOURNAL_DIR;
+string UNFILLED_LOG;
+string CLOSED_LOG;
+string OPEN_LOG;
 
 // One entry per signal that opened orders: needed to move SL to entry later.
 string   sKey[];
@@ -248,22 +258,56 @@ bool InWeekendBlock()
 int OnInit()
 {
    trade.SetDeviationInPoints(InpDeviation);
+   // Re-init also follows a change of account; start from that account's own files.
+   ACCOUNT = "";
+   while(ArraySize(sKey) > 0)
+      RemoveState(0);
+   ArrayResize(jDeals, 0);
+   if(!EventSetMillisecondTimer(InpTimerMs))
+      EventSetTimer(1);
+   if(!SetupAccount())
+      Print("GoldChartExecutor: waiting for the trading account to connect");
+   return INIT_SUCCEEDED;
+}
+
+// Runs once the terminal knows its account number; until then the EA does nothing.
+bool SetupAccount()
+{
+   if(ACCOUNT != "")
+      return true;
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   if(login == 0)
+      return false;
+   ACCOUNT = IntegerToString(login);
+   DONE_DIR     = "gt_signals\\done\\" + ACCOUNT + "\\";
+   SKIP_DIR     = "gt_signals\\skipped\\" + ACCOUNT + "\\";
+   STATE_DIR    = "gt_state\\" + ACCOUNT + "\\";
+   COUNT_DIR    = "gt_count\\" + ACCOUNT + "\\";
+   JOURNAL_DIR  = "gt_journal\\" + ACCOUNT + "\\";
+   UNFILLED_LOG = JOURNAL_DIR + "unfilled.csv";
+   CLOSED_LOG   = JOURNAL_DIR + "closed.csv";
+   OPEN_LOG     = JOURNAL_DIR + "open.csv";
    FolderCreate("gt_signals", FILE_COMMON);
    FolderCreate("gt_signals\\done", FILE_COMMON);
    FolderCreate("gt_signals\\skipped", FILE_COMMON);
+   FolderCreate("gt_signals\\done\\" + ACCOUNT, FILE_COMMON);
+   FolderCreate("gt_signals\\skipped\\" + ACCOUNT, FILE_COMMON);
    FolderCreate("gt_state", FILE_COMMON);
+   FolderCreate("gt_state\\" + ACCOUNT, FILE_COMMON);
    FolderCreate("gt_count", FILE_COMMON);
+   FolderCreate("gt_count\\" + ACCOUNT, FILE_COMMON);
    FolderCreate("gt_journal", FILE_COMMON);
-   LoadStates();
+   FolderCreate("gt_journal\\" + ACCOUNT, FILE_COMMON);
+   LoadStates(STATE_DIR, false);
+   LoadStates(LEGACY_STATE_DIR, true);
+   AdoptLegacyUnfilled();
    CancelPendingAtFirstTp(true);
    LoadJournaledDeals();
    SyncJournal();
-   if(!EventSetMillisecondTimer(InpTimerMs))
-      EventSetTimer(1);
-   PrintFormat("GoldChartExecutor started: symbol=%s mode=%s tracked=%d",
-               _Symbol, (InpDryRun ? "DRY RUN" : "LIVE"), ArraySize(sKey));
+   PrintFormat("GoldChartExecutor started: account=%s symbol=%s mode=%s tracked=%d",
+               ACCOUNT, _Symbol, (InpDryRun ? "DRY RUN" : "LIVE"), ArraySize(sKey));
    ShowStatus();
-   return INIT_SUCCEEDED;
+   return true;
 }
 
 void OnDeinit(const int reason)
@@ -274,12 +318,16 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   if(ACCOUNT == "")
+      return;
    CancelPendingAtFirstTp(false);
    ManageBreakeven();
 }
 
 void OnTimer()
 {
+   if(!SetupAccount())
+      return;
    WeekendClose();
    ExpirePending();
    ProcessSignals();
@@ -479,11 +527,13 @@ void SaveState(const int i)
    WriteTextFile(STATE_DIR + sKey[i] + ".txt", body, true);
 }
 
-void LoadStates()
+// legacy: gt_state\ from before the per-account folders. A file is taken over only when one of
+// its tickets exists in this account; the other terminal takes the rest.
+void LoadStates(const string dir, const bool legacy)
 {
    string names[];
    string name;
-   long h = FileFindFirst(STATE_DIR + "*.txt", name, FILE_COMMON);
+   long h = FileFindFirst(dir + "*.txt", name, FILE_COMMON);
    if(h == INVALID_HANDLE)
       return;
    do
@@ -498,9 +548,11 @@ void LoadStates()
    for(int f = 0; f < ArraySize(names); f++)
    {
       string lines[];
-      if(!ReadLines(STATE_DIR + names[f], lines))
+      if(!ReadLines(dir + names[f], lines))
          continue;
       string key = StringSubstr(names[f], 0, StringLen(names[f]) - 4);
+      if(legacy && StateIndex(key) >= 0)
+         continue;
       int side = 0;
       double trigger = 0.0;
       bool be = false;
@@ -528,7 +580,42 @@ void LoadStates()
       sSide[i] = side;
       sTrigger[i] = trigger;
       sBe[i] = be;
+      if(!legacy)
+         continue;
+      if(StateAlive(i))
+      {
+         SaveState(i);
+         FileDelete(dir + names[f], FILE_COMMON);
+         PrintFormat("Took over %s from the shared state folder", key);
+      }
+      else
+         RemoveState(i);
    }
+}
+
+// unfilled.csv rows from before the per-account journal, kept for the orders of this account.
+void AdoptLegacyUnfilled()
+{
+   if(FileIsExist(UNFILLED_LOG, FILE_COMMON))
+      return;
+   string lines[];
+   if(!ReadLines(LEGACY_UNFILLED_LOG, lines) || ArraySize(lines) < 2)
+      return;
+   HistorySelect(TimeCurrent() - 60 * 86400, TimeCurrent() + 86400);
+   int kept = 0;
+   for(int l = 1; l < ArraySize(lines); l++)
+   {
+      string cols[];
+      if(StringSplit(lines[l], ',', cols) < 6)
+         continue;
+      ulong ticket = (ulong)StringToInteger(cols[5]);
+      if(ticket == 0 || !HistoryOrderSelect(ticket))
+         continue;
+      AppendCsv(UNFILLED_LOG, lines[0], lines[l]);
+      kept++;
+   }
+   if(kept > 0)
+      PrintFormat("Copied %d not-executed orders of account %s into %s", kept, ACCOUNT, UNFILLED_LOG);
 }
 
 bool StateAlive(const int i)
@@ -569,19 +656,27 @@ int OpenTrades(const int slot)
 // ---------------------------------------------------------------- Monthly trade number
 
 // Per group, per Israel calendar month: the first trade of the month is N1.
-string CounterFile(const int slot)
+string CounterName(const int slot)
 {
    MqlDateTime t;
    TimeToStruct(IsraelNow(), t);
-   return COUNT_DIR + StringFormat("G%d_%04d%02d.txt", slot, t.year, t.mon);
+   return StringFormat("G%d_%04d%02d.txt", slot, t.year, t.mon);
+}
+
+string CounterFile(const int slot)
+{
+   return COUNT_DIR + CounterName(slot);
 }
 
 int LastTradeNumber(const int slot)
 {
    string lines[];
-   if(!ReadLines(CounterFile(slot), lines) || ArraySize(lines) == 0)
-      return 0;
-   return (int)StringToInteger(lines[0]);
+   if(ReadLines(CounterFile(slot), lines) && ArraySize(lines) > 0)
+      return (int)StringToInteger(lines[0]);
+   // This month's number from before counters were kept per account.
+   if(ReadLines(LEGACY_COUNT_DIR + CounterName(slot), lines) && ArraySize(lines) > 0)
+      return (int)StringToInteger(lines[0]);
+   return 0;
 }
 
 void SaveTradeNumber(const int slot, const int number)
@@ -752,10 +847,11 @@ long ParseIsoUtc(const string iso)
    return t;
 }
 
+// Copies, never moves: the other terminals still have to read the same signal.
 void Archive(const string name, const string dir)
 {
-   if(!FileMove(SIG_DIR + name, FILE_COMMON, dir + name, FILE_COMMON|FILE_REWRITE))
-      FileDelete(SIG_DIR + name, FILE_COMMON);
+   if(!FileCopy(SIG_DIR + name, FILE_COMMON, dir + name, FILE_COMMON|FILE_REWRITE))
+      WriteTextFile(dir + name, "{}", true);
 }
 
 void ProcessSignals()
@@ -790,8 +886,10 @@ void HandleSignal(const string name)
    string path = SIG_DIR + name;
    if(FileIsExist(DONE_DIR + name, FILE_COMMON) || FileIsExist(SKIP_DIR + name, FILE_COMMON))
    {
-      PrintFormat("Duplicate %s already handled — discarded", name);
-      FileDelete(path, FILE_COMMON);
+      // Left in place for the other terminals; removed once it is a day old.
+      datetime modified = (datetime)FileGetInteger(path, FILE_MODIFY_DATE, true);
+      if(modified > 0 && TimeLocal() - modified > SIGNAL_KEEP_SEC)
+         FileDelete(path, FILE_COMMON);
       return;
    }
    string js = ReadAll(path);
@@ -1212,7 +1310,7 @@ void SafetyGuard()
 
 // ---------------------------------------------------------------- Trade journal
 
-// The reporting service reads three CSV files from Common\Files\gt_journal, all in Israel time:
+// The reporting service reads three CSV files from Common\Files\gt_journal\<account>, all in Israel time:
 // closed.csv (one row per closing deal), open.csv (snapshot of what is running now), and
 // unfilled.csv (pending orders deleted without filling). closed.csv is rebuilt from the
 // broker's history, so closes that happened while MT5 was down are added on the next sync.
@@ -1435,8 +1533,8 @@ void WriteOpenSnapshot()
          OrderGetDouble(ORDER_VOLUME_CURRENT), IsraelText((datetime)OrderGetInteger(ORDER_TIME_SETUP)),
          OrderGetDouble(ORDER_PRICE_OPEN), OrderGetDouble(ORDER_SL), OrderGetDouble(ORDER_TP));
    }
-   WriteTextFile("gt_journal\\open.tmp", body, true);
-   FileMove("gt_journal\\open.tmp", FILE_COMMON, OPEN_LOG, FILE_COMMON|FILE_REWRITE);
+   WriteTextFile(JOURNAL_DIR + "open.tmp", body, true);
+   FileMove(JOURNAL_DIR + "open.tmp", FILE_COMMON, OPEN_LOG, FILE_COMMON|FILE_REWRITE);
 }
 
 void SyncJournal()
@@ -1569,7 +1667,7 @@ string SlotStatus(const int slot, const string label, const bool on, const doubl
 void ShowStatus()
 {
    Comment(
-      "Gold Trading — Chart Executor  [", (InpDryRun ? "DRY RUN" : "LIVE"), "]\n",
+      "Gold Trading — Chart Executor  [", (InpDryRun ? "DRY RUN" : "LIVE"), "]  account ", ACCOUNT, "\n",
       "Israel ", TimeToString(IsraelNow(), TIME_DATE|TIME_MINUTES),
       (InWeekendBlock() ? "  WEEKEND BLOCK" : ""), "\n",
       SlotStatus(1, "VIP   ", InpTrade1, InpLot1, InpStrat1),
