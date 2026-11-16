@@ -43,7 +43,7 @@ input int    InpMax6   = 0;     // Max open trades GOLD BULLET SIGNALS (0 = unli
 input bool   InpTrade7 = false; // Trade Alphabet Forex
 input double InpLot7   = 0.01;  // Lot Alphabet Forex
 input int    InpStrat7 = 6;     // Strategy Alphabet Forex (1-6)
-input long   InpChat7  = 0;     // Chat id Alphabet Forex (from the listener log)
+input long   InpChat7  = -1002192816520; // Chat id Alphabet Forex
 input int    InpMax7   = 0;     // Max open trades Alphabet Forex (0 = unlimited)
 
 input bool   InpDryRun            = true; // Dry run (log only, no orders)
