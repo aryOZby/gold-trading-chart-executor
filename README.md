@@ -14,7 +14,7 @@ The EA sits on a gold chart (`XAUUSD`, `XAUUSD.s`, …) and trades the chart sym
 - **Lot** — volume per position
 - **Strategy** — playbook `1`–`6`
 - **Chat id** — the Telegram group feeding that slot
-- **Max open trades** — how many of that group's trades may run at once; `0` means unlimited
+- **Max open trades** — how many of that group's trades may run at once; `0` means unlimited. A trade counts once at least one of its positions has opened; pending orders that have not filled do not count.
 
 Changes apply as soon as you press OK in Inputs.
 

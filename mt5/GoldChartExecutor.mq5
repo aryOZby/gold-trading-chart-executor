@@ -1,5 +1,5 @@
 #property copyright "Gold Trading"
-#property version   "3.91"
+#property version   "3.92"
 #property description "Chart Executor: reads listener signals, strategies 1-6, breakeven, 50-pip guard, Friday close"
 
 #include <Trade/Trade.mqh>
@@ -642,13 +642,22 @@ void CleanupStates()
    }
 }
 
-// A trade is one signal: it counts while any of its positions or pending orders is open.
+bool StateHasPosition(const int i)
+{
+   for(int k = 0; k < sCount[i]; k++)
+      if(SelectPositionById(sTickets[i][k]))
+         return true;
+   return false;
+}
+
+// A trade is one signal: it counts while at least one of its positions is open. Pending orders
+// that have not filled yet do not count.
 int OpenTrades(const int slot)
 {
    string prefix = IntegerToString(slot) + "-";
    int n = 0;
    for(int i = 0; i < ArraySize(sKey); i++)
-      if(StringFind(sKey[i], prefix) == 0 && StateAlive(i))
+      if(StringFind(sKey[i], prefix) == 0 && StateHasPosition(i))
          n++;
    return n;
 }
